@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js';
-import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js';
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, serverTimestamp, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { Menu, X, LogOut, Plus, Users, Trophy, BarChart3, Settings, Copy, Check, Calendar, Lock, Edit } from 'lucide-react';
 
 const firebaseConfig = {
