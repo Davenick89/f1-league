@@ -19,30 +19,30 @@ setPersistence(auth, browserLocalPersistence).catch(e => console.error("Auth err
 const db = getFirestore(app);
 
 const F1_SCHEDULE_2026 = [
-  { round: 1, name: "Australia", location: "Melbourne", date: "2026-03-08", fp1: "2026-03-06T09:30:00", isSprint: false },
-  { round: 2, name: "China", location: "Shanghai", date: "2026-03-15", fp1: "2026-03-13T10:00:00", isSprint: true },
-  { round: 3, name: "Japan", location: "Suzuka", date: "2026-03-29", fp1: "2026-03-27T10:00:00", isSprint: false },
-  { round: 4, name: "Bahrain", location: "Sakhir", date: "2026-04-12", fp1: "2026-04-10T14:00:00", isSprint: false },
-  { round: 5, name: "Saudi Arabia", location: "Jeddah", date: "2026-04-19", fp1: "2026-04-17T17:00:00", isSprint: false },
-  { round: 6, name: "Miami", location: "Miami", date: "2026-05-03", fp1: "2026-05-01T13:00:00", isSprint: true },
-  { round: 7, name: "Canada", location: "Montreal", date: "2026-05-24", fp1: "2026-05-22T14:00:00", isSprint: true },
-  { round: 8, name: "Monaco", location: "Monte Carlo", date: "2026-06-07", fp1: "2026-06-05T14:00:00", isSprint: false },
-  { round: 9, name: "Barcelona-Catalunya", location: "Barcelona", date: "2026-06-14", fp1: "2026-06-12T13:00:00", isSprint: false },
-  { round: 10, name: "Austria", location: "Spielberg", date: "2026-06-28", fp1: "2026-06-26T14:00:00", isSprint: false },
-  { round: 11, name: "Great Britain", location: "Silverstone", date: "2026-07-05", fp1: "2026-07-03T13:00:00", isSprint: true },
-  { round: 12, name: "Belgium", location: "Spa", date: "2026-07-19", fp1: "2026-07-17T14:00:00", isSprint: false },
-  { round: 13, name: "Hungary", location: "Budapest", date: "2026-07-26", fp1: "2026-07-24T14:00:00", isSprint: false },
-  { round: 14, name: "Netherlands", location: "Zandvoort", date: "2026-08-23", fp1: "2026-08-21T14:00:00", isSprint: true },
-  { round: 15, name: "Italy", location: "Monza", date: "2026-09-06", fp1: "2026-09-04T13:00:00", isSprint: false },
-  { round: 16, name: "Spain", location: "Madrid", date: "2026-09-13", fp1: "2026-09-11T14:00:00", isSprint: false },
-  { round: 17, name: "Azerbaijan", location: "Baku", date: "2026-09-27", fp1: "2026-09-25T12:00:00", isSprint: false },
-  { round: 18, name: "Singapore", location: "Singapore", date: "2026-10-11", fp1: "2026-10-09T14:00:00", isSprint: true },
-  { round: 19, name: "United States", location: "Austin", date: "2026-10-25", fp1: "2026-10-23T12:00:00", isSprint: false },
-  { round: 20, name: "Mexico", location: "Mexico City", date: "2026-11-01", fp1: "2026-10-30T18:00:00", isSprint: false },
-  { round: 21, name: "Brazil", location: "São Paulo", date: "2026-11-08", fp1: "2026-11-06T11:00:00", isSprint: false },
-  { round: 22, name: "Las Vegas", location: "Las Vegas", date: "2026-11-21", fp1: "2026-11-19T22:00:00", isSprint: false },
-  { round: 23, name: "Qatar", location: "Lusail", date: "2026-11-29", fp1: "2026-11-27T15:00:00", isSprint: false },
-  { round: 24, name: "Abu Dhabi", location: "Yas Island", date: "2026-12-06", fp1: "2026-12-04T08:00:00", isSprint: false },
+  { round: 1, name: "Australia", location: "Melbourne", date: "2026-03-08", fp1: "2026-03-06T09:30:00", raceStart: "2026-03-08T04:00:00Z", isSprint: false },
+  { round: 2, name: "China", location: "Shanghai", date: "2026-03-15", fp1: "2026-03-13T10:00:00", raceStart: "2026-03-15T07:00:00Z", isSprint: true },
+  { round: 3, name: "Japan", location: "Suzuka", date: "2026-03-29", fp1: "2026-03-27T10:00:00", raceStart: "2026-03-29T05:00:00Z", isSprint: false },
+  { round: 4, name: "Bahrain", location: "Sakhir", date: "2026-04-12", fp1: "2026-04-10T14:00:00", raceStart: "2026-04-12T15:00:00Z", isSprint: false },
+  { round: 5, name: "Saudi Arabia", location: "Jeddah", date: "2026-04-19", fp1: "2026-04-17T17:00:00", raceStart: "2026-04-19T17:00:00Z", isSprint: false },
+  { round: 6, name: "Miami", location: "Miami", date: "2026-05-03", fp1: "2026-05-01T13:00:00", raceStart: "2026-05-03T19:30:00Z", isSprint: true },
+  { round: 7, name: "Canada", location: "Montreal", date: "2026-05-24", fp1: "2026-05-22T14:00:00", raceStart: "2026-05-24T18:00:00Z", isSprint: true },
+  { round: 8, name: "Monaco", location: "Monte Carlo", date: "2026-06-07", fp1: "2026-06-05T14:00:00", raceStart: "2026-06-07T13:00:00Z", isSprint: false },
+  { round: 9, name: "Barcelona-Catalunya", location: "Barcelona", date: "2026-06-14", fp1: "2026-06-12T13:00:00", raceStart: "2026-06-14T13:00:00Z", isSprint: false },
+  { round: 10, name: "Austria", location: "Spielberg", date: "2026-06-28", fp1: "2026-06-26T14:00:00", raceStart: "2026-06-28T13:00:00Z", isSprint: false },
+  { round: 11, name: "Great Britain", location: "Silverstone", date: "2026-07-05", fp1: "2026-07-03T13:00:00", raceStart: "2026-07-05T14:00:00Z", isSprint: true },
+  { round: 12, name: "Belgium", location: "Spa", date: "2026-07-19", fp1: "2026-07-17T14:00:00", raceStart: "2026-07-19T13:00:00Z", isSprint: false },
+  { round: 13, name: "Hungary", location: "Budapest", date: "2026-07-26", fp1: "2026-07-24T14:00:00", raceStart: "2026-07-26T13:00:00Z", isSprint: false },
+  { round: 14, name: "Netherlands", location: "Zandvoort", date: "2026-08-23", fp1: "2026-08-21T14:00:00", raceStart: "2026-08-23T13:00:00Z", isSprint: true },
+  { round: 15, name: "Italy", location: "Monza", date: "2026-09-06", fp1: "2026-09-04T13:00:00", raceStart: "2026-09-06T13:00:00Z", isSprint: false },
+  { round: 16, name: "Spain", location: "Madrid", date: "2026-09-13", fp1: "2026-09-11T14:00:00", raceStart: "2026-09-13T13:00:00Z", isSprint: false },
+  { round: 17, name: "Azerbaijan", location: "Baku", date: "2026-09-27", fp1: "2026-09-25T12:00:00", raceStart: "2026-09-27T11:00:00Z", isSprint: false },
+  { round: 18, name: "Singapore", location: "Singapore", date: "2026-10-11", fp1: "2026-10-09T14:00:00", raceStart: "2026-10-11T12:00:00Z", isSprint: true },
+  { round: 19, name: "United States", location: "Austin", date: "2026-10-25", fp1: "2026-10-23T12:00:00", raceStart: "2026-10-25T19:00:00Z", isSprint: false },
+  { round: 20, name: "Mexico", location: "Mexico City", date: "2026-11-01", fp1: "2026-10-30T18:00:00", raceStart: "2026-11-01T20:00:00Z", isSprint: false },
+  { round: 21, name: "Brazil", location: "São Paulo", date: "2026-11-08", fp1: "2026-11-06T11:00:00", raceStart: "2026-11-08T17:00:00Z", isSprint: false },
+  { round: 22, name: "Las Vegas", location: "Las Vegas", date: "2026-11-21", fp1: "2026-11-19T22:00:00", raceStart: "2026-11-22T06:00:00Z", isSprint: false },
+  { round: 23, name: "Qatar", location: "Lusail", date: "2026-11-29", fp1: "2026-11-27T15:00:00", raceStart: "2026-11-29T16:00:00Z", isSprint: false },
+  { round: 24, name: "Abu Dhabi", location: "Yas Island", date: "2026-12-06", fp1: "2026-12-04T08:00:00", raceStart: "2026-12-06T13:00:00Z", isSprint: false },
 ];
 
 const F1_DRIVERS = [
@@ -72,11 +72,11 @@ function getCurrentRound() {
 }
 
 function getTimeUntilLock(race) {
-  if (!race || !race.fp1) return "N/A";
+  if (!race || !race.raceStart) return "N/A";
 
-  // FP1 time minus 5 hours = lock time
-  const fp1Time = new Date(race.fp1);
-  const lockTime = new Date(fp1Time.getTime() - (5 * 60 * 60 * 1000));
+  // Race start time minus 5 hours = lock time
+  const raceTime = new Date(race.raceStart);
+  const lockTime = new Date(raceTime.getTime() - (5 * 60 * 60 * 1000));
 
   const now = new Date();
   const diff = lockTime - now;
@@ -93,11 +93,11 @@ function getTimeUntilLock(race) {
 }
 
 function isEditLocked(race) {
-  if (!race || !race.fp1) return false;
+  if (!race || !race.raceStart) return false;
 
-  // FP1 time minus 5 hours = lock time
-  const fp1Time = new Date(race.fp1);
-  const lockTime = new Date(fp1Time.getTime() - (5 * 60 * 60 * 1000));
+  // Race start time minus 5 hours = lock time
+  const raceTime = new Date(race.raceStart);
+  const lockTime = new Date(raceTime.getTime() - (5 * 60 * 60 * 1000));
 
   return new Date() >= lockTime;
 }
@@ -381,7 +381,7 @@ export default function F1League() {
           <div className="lg:col-span-3">
             {currentView === "leaderboard" && <LeaderboardView group={selectedGroup} currentRound={currentRound} />}
             {currentView === "predict" && <PredictionView group={selectedGroup} race={race} currentRound={currentRound} countdown={countdown} user={user} />}
-            {currentView === "calendar" && <CalendarView currentRound={currentRound} />}
+            {currentView === "calendar" && <CalendarView group={selectedGroup} user={user} currentRound={currentRound} />}
             {currentView === "seasonBoard" && <SeasonBoardView group={selectedGroup} user={user} />}
             {currentView === "howToPlay" && <HowToPlayView />}
             {currentView === "results" && <ResultsView group={selectedGroup} user={user} currentRound={currentRound} />}
@@ -415,15 +415,15 @@ function LeaderboardView({ group, currentRound }) {
 
     const unsubscribe = onSnapshot(collection(db, `groups/${group.id}/scores`), async (snapshot) => {
       try {
-        const leaderboardData = await Promise.all(snapshot.docs.map(async (doc) => {
-          const userRef = doc(db, "users", doc.id);
+        const leaderboardData = await Promise.all(snapshot.docs.map(async (scoreDoc) => {
+          const userRef = doc(db, "users", scoreDoc.id);
           const userDoc = await getDoc(userRef);
           const nickname = userDoc.data()?.nickname || "Unknown";
           let totalPoints = 0;
           for (let i = 1; i <= currentRound; i++) {
-            totalPoints += doc.data()[`round${i}`]?.totalPoints || 0;
+            totalPoints += scoreDoc.data()[`round${i}`]?.totalPoints || 0;
           }
-          return { userId: doc.id, nickname, totalPoints };
+          return { userId: scoreDoc.id, nickname, totalPoints };
         }));
         setLeaderboard(leaderboardData.sort((a, b) => b.totalPoints - a.totalPoints));
       } catch (error) {
@@ -1055,7 +1055,7 @@ function HowToPlayView() {
 
         <div>
           <h3 className="text-lg font-bold text-red-600 mb-3">🔒 Edit Window</h3>
-          <p className="text-gray-300 text-sm">Predictions lock <span className="font-bold">5 hours before FP1</span>. Edit anytime until then.</p>
+          <p className="text-gray-300 text-sm">Predictions lock <span className="font-bold">5 hours before the race starts</span>. Edit anytime until then.</p>
         </div>
       </div>
     </div>
@@ -1064,7 +1064,8 @@ function HowToPlayView() {
 
 // RESULTS VIEW - ADMIN ENTRY
 function ResultsView({ group, user, currentRound }) {
-  const race = F1_SCHEDULE_2026[currentRound - 1];
+  const [selectedRound, setSelectedRound] = useState(currentRound);
+  const race = F1_SCHEDULE_2026[selectedRound - 1];
   const [results, setResults] = useState({
     pole: "",
     raceP1: "",
@@ -1077,42 +1078,61 @@ function ResultsView({ group, user, currentRound }) {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [existingResults, setExistingResults] = useState(null);
+  const [nowTs, setNowTs] = useState(() => Date.now());
 
-  // Load existing results if any
+  // Update timestamp every minute for countdown accuracy
+  useEffect(() => {
+    const interval = setInterval(() => setNowTs(Date.now()), 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Load existing results if any — resets whenever selected round changes
   useEffect(() => {
     if (!group) return;
 
+    // Clear stale data from previous round
+    setResults({ pole: "", raceP1: "", raceP2: "", raceP3: "", fastestLap: "", finisherAtPosition: "" });
+    setExistingResults(null);
+    setRandomNumber(null);
+
     const unsubscribe = onSnapshot(
-      doc(db, `groups/${group.id}/results`, `round${currentRound}`),
-      (doc) => {
-        if (doc.exists()) {
-          setExistingResults(doc.data());
-          setResults(doc.data());
+      doc(db, `groups/${group.id}/results`, `round${selectedRound}`),
+      (snap) => {
+        if (snap.exists()) {
+          setExistingResults(snap.data());
+          setResults(snap.data());
         }
       },
       (error) => console.error("Error:", error)
     );
 
     return () => unsubscribe();
-  }, [group, currentRound]);
+  }, [group, selectedRound]);
 
-  // Load random number
+  // Load random number for selected round
   useEffect(() => {
     if (!group) return;
 
     const unsubscribe = onSnapshot(
-      doc(db, `groups/${group.id}/randomNumbers`, `round${currentRound}`),
-      (doc) => {
-        if (doc.exists()) {
-          setRandomNumber(doc.data().number);
+      doc(db, `groups/${group.id}/randomNumbers`, `round${selectedRound}`),
+      (snap) => {
+        if (snap.exists()) {
+          setRandomNumber(snap.data().number);
         }
       }
     );
 
     return () => unsubscribe();
-  }, [group, currentRound]);
+  }, [group, selectedRound]);
 
   const handleSaveResults = async () => {
+    // Hard lock guard — re-check at save time
+    if (lockTimeMs !== null && Date.now() > lockTimeMs) {
+      setMessage("⛔ Results editing locked — 24 hours have passed since race end");
+      setTimeout(() => setMessage(""), 4000);
+      return;
+    }
+
     if (!results.pole || !results.raceP1 || !results.raceP2 || !results.raceP3) {
       setMessage("⚠️ All race results required (Pole, P1, P2, P3)");
       setTimeout(() => setMessage(""), 3000);
@@ -1121,7 +1141,7 @@ function ResultsView({ group, user, currentRound }) {
 
     setLoading(true);
     try {
-      const resultsRef = doc(db, `groups/${group.id}/results`, `round${currentRound}`);
+      const resultsRef = doc(db, `groups/${group.id}/results`, `round${selectedRound}`);
 
       await setDoc(resultsRef, {
         pole: results.pole,
@@ -1139,8 +1159,8 @@ function ResultsView({ group, user, currentRound }) {
       // NOW CALCULATE POINTS FOR ALL PREDICTIONS
       await calculateAndSaveScores();
 
-      setMessage("✅ Results saved! Points calculated for all players.");
-      setTimeout(() => setMessage(""), 3000);
+      setMessage(`✅ Round ${selectedRound} results saved! Points calculated for all players.`);
+      setTimeout(() => setMessage(""), 4000);
     } catch (error) {
       console.error("Error:", error);
       setMessage("❌ Error saving results");
@@ -1159,7 +1179,7 @@ function ResultsView({ group, user, currentRound }) {
       // For each user with predictions
       for (const predDoc of predictionsSnapshot.docs) {
         const userId = predDoc.id;
-        const roundData = predDoc.data()[`round${currentRound}`];
+        const roundData = predDoc.data()[`round${selectedRound}`];
 
         if (!roundData) continue; // Skip if no predictions for this round
 
@@ -1230,7 +1250,7 @@ function ResultsView({ group, user, currentRound }) {
         // Save scores
         const scoresRef = doc(db, `groups/${group.id}/scores`, userId);
         await setDoc(scoresRef, {
-          [`round${currentRound}`]: {
+          [`round${selectedRound}`]: {
             totalPoints: totalPoints,
             breakdown: breakdown
           }
@@ -1243,6 +1263,19 @@ function ResultsView({ group, user, currentRound }) {
   };
 
   const isAdmin = group && group.admin === user.uid;
+
+  // 24-hour edit lock — all comparisons use plain timestamps (ms) to avoid Date object issues
+  const lockTimeMs = race?.raceStart
+    ? new Date(race.raceStart).getTime() + 24 * 60 * 60 * 1000
+    : null;
+  const lockTime = lockTimeMs ? new Date(lockTimeMs) : null;
+  const isLocked = lockTimeMs !== null ? nowTs > lockTimeMs : false;
+  const msUntilLock = lockTimeMs !== null ? Math.max(0, lockTimeMs - nowTs) : 0;
+  const hoursUntilLock = Math.floor(msUntilLock / (1000 * 60 * 60));
+  const minutesUntilLock = Math.floor((msUntilLock % (1000 * 60 * 60)) / (1000 * 60));
+  const formatUTC = (date) => date
+    ? date.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC'
+    : '';
 
   if (!race) {
     return (
@@ -1257,7 +1290,51 @@ function ResultsView({ group, user, currentRound }) {
     <div className="space-y-6">
       <div className="bg-gray-900 border border-red-600/50 rounded-lg p-6">
         <h2 className="text-2xl font-bold mb-4" style={{ fontFamily: "'Orbitron'" }}>📊 RACE RESULTS</h2>
-        <p className="text-gray-400 mb-6">{race.name} - Round {currentRound}</p>
+
+        {/* Round Selector — always visible so admin can pick any completed/current race */}
+        <div className="mb-5">
+          <label className="block text-sm font-bold mb-2 text-gray-300">Select Race</label>
+          <select
+            value={selectedRound}
+            onChange={(e) => setSelectedRound(parseInt(e.target.value))}
+            className="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white"
+          >
+            {F1_SCHEDULE_2026.filter(r => r.round <= currentRound).map(r => (
+              <option key={r.round} value={r.round}>
+                Round {r.round}: {r.name}{r.round === currentRound ? ' (Current)' : ' — Past'}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <p className="text-gray-400 mb-4">{race?.name} — Round {selectedRound}{selectedRound < currentRound ? ' (Past Race)' : ''}</p>
+
+        {/* Lock status banner */}
+        {isAdmin && lockTime && (
+          isLocked ? (
+            <div className="bg-red-900/40 border border-red-500 p-4 rounded mb-5">
+              <p className="text-red-400 font-bold text-base">⛔ RESULTS LOCKED</p>
+              <p className="text-red-300 text-sm mt-1">
+                This race's results cannot be edited. The 24-hour editing window closed on {formatUTC(lockTime)}.
+              </p>
+            </div>
+          ) : (
+            <div className="bg-green-900/30 border border-green-600/50 p-4 rounded mb-5">
+              <p className="text-green-400 font-bold text-base">✅ RESULTS EDITABLE</p>
+              <p className="text-green-300 text-sm mt-1">
+                You can edit results until {formatUTC(lockTime)}{' '}
+                ({msUntilLock > 0 ? `${hoursUntilLock}h ${minutesUntilLock}m remaining` : 'closing soon'})
+              </p>
+            </div>
+          )
+        )}
+
+        {selectedRound < currentRound && !isLocked && isAdmin && (
+          <div className="bg-yellow-900/30 border border-yellow-600/50 p-3 rounded mb-5">
+            <p className="text-yellow-300 text-sm font-bold">⚠️ Editing past race results</p>
+            <p className="text-yellow-200 text-xs mt-1">Saving will recalculate and overwrite points for this round for all players.</p>
+          </div>
+        )}
 
         {!isAdmin ? (
           <div className="bg-gray-800 p-4 rounded border border-gray-700">
@@ -1265,10 +1342,18 @@ function ResultsView({ group, user, currentRound }) {
           </div>
         ) : (
           <>
-            <div className="bg-blue-900/30 border border-blue-600/50 p-4 rounded mb-6">
-              <p className="text-blue-300 font-bold mb-2">🔐 ADMIN MODE</p>
-              <p className="text-sm text-blue-200">You can enter race results. Points will calculate automatically for all players.</p>
-            </div>
+            {!isLocked && (
+              <div className="bg-blue-900/30 border border-blue-600/50 p-4 rounded mb-6">
+                <p className="text-blue-300 font-bold mb-2">🔐 ADMIN MODE</p>
+                <p className="text-sm text-blue-200">You can enter race results. Points will calculate automatically for all players.</p>
+              </div>
+            )}
+            {isLocked && (
+              <div className="bg-gray-800 border border-gray-700 p-4 rounded mb-6">
+                <p className="text-gray-400 font-bold mb-1">🔒 VIEW ONLY</p>
+                <p className="text-sm text-gray-500">Results can no longer be edited. The editing window has closed.</p>
+              </div>
+            )}
 
             {existingResults && (
               <div className="bg-green-900/30 border border-green-600/50 p-4 rounded mb-6">
@@ -1293,7 +1378,8 @@ function ResultsView({ group, user, currentRound }) {
                   <select
                     value={results.pole}
                     onChange={(e) => setResults({ ...results, pole: e.target.value })}
-                    className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white"
+                    disabled={isLocked}
+                    className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="">Select Driver</option>
                     {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
@@ -1305,7 +1391,8 @@ function ResultsView({ group, user, currentRound }) {
                   <select
                     value={results.raceP1}
                     onChange={(e) => setResults({ ...results, raceP1: e.target.value })}
-                    className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white"
+                    disabled={isLocked}
+                    className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="">Select Driver</option>
                     {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
@@ -1317,7 +1404,8 @@ function ResultsView({ group, user, currentRound }) {
                   <select
                     value={results.raceP2}
                     onChange={(e) => setResults({ ...results, raceP2: e.target.value })}
-                    className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white"
+                    disabled={isLocked}
+                    className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="">Select Driver</option>
                     {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
@@ -1329,7 +1417,8 @@ function ResultsView({ group, user, currentRound }) {
                   <select
                     value={results.raceP3}
                     onChange={(e) => setResults({ ...results, raceP3: e.target.value })}
-                    className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white"
+                    disabled={isLocked}
+                    className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="">Select Driver</option>
                     {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
@@ -1341,7 +1430,8 @@ function ResultsView({ group, user, currentRound }) {
                   <select
                     value={results.fastestLap}
                     onChange={(e) => setResults({ ...results, fastestLap: e.target.value })}
-                    className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white"
+                    disabled={isLocked}
+                    className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="">Select Driver</option>
                     {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
@@ -1354,7 +1444,8 @@ function ResultsView({ group, user, currentRound }) {
                     <select
                       value={results.finisherAtPosition}
                       onChange={(e) => setResults({ ...results, finisherAtPosition: e.target.value })}
-                      className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white"
+                      disabled={isLocked}
+                      className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <option value="">Select Driver</option>
                       {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
@@ -1366,10 +1457,11 @@ function ResultsView({ group, user, currentRound }) {
 
             <button
               onClick={handleSaveResults}
-              disabled={loading}
-              className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white font-bold py-3 rounded-lg"
+              disabled={loading || isLocked}
+              className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white font-bold py-3 rounded-lg disabled:cursor-not-allowed"
+              title={isLocked ? "Results editing locked — 24 hours have passed since race end" : "Save results and calculate points for all players"}
             >
-              {loading ? "Saving..." : "SAVE RESULTS & CALCULATE POINTS"}
+              {loading ? "Saving..." : isLocked ? "🔒 RESULTS LOCKED" : "SAVE RESULTS & CALCULATE POINTS"}
             </button>
 
             {message && (
@@ -1440,42 +1532,367 @@ function InvitesView({ group, generateInviteLink, inviteLink, copiedLink }) {
 }
 
 // CALENDAR VIEW
-function CalendarView({ currentRound }) {
+function CalendarView({ group, user, currentRound }) {
+  const [loading, setLoading] = useState(true);
+  const [allPredictions, setAllPredictions] = useState({});
+  const [results, setResults] = useState({});
+  const [scores, setScores] = useState({});
+  const [memberNicknames, setMemberNicknames] = useState({});
+  const [expandedRound, setExpandedRound] = useState(null);
+  const [filter, setFilter] = useState('all');
+  const [currentCountdown, setCurrentCountdown] = useState('');
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  useEffect(() => {
+    if (!group) return;
+    const loadAllData = async () => {
+      setLoading(true);
+      try {
+        const [predsSnap, scoresSnap] = await Promise.all([
+          getDocs(collection(db, `groups/${group.id}/predictions`)),
+          getDocs(collection(db, `groups/${group.id}/scores`)),
+        ]);
+
+        const predsMap = {};
+        predsSnap.docs.forEach(d => { predsMap[d.id] = d.data(); });
+        setAllPredictions(predsMap);
+
+        const scoresMap = {};
+        scoresSnap.docs.forEach(d => { scoresMap[d.id] = d.data(); });
+        setScores(scoresMap);
+
+        const pastRoundNums = F1_SCHEDULE_2026.filter(r => r.round < currentRound).map(r => r.round);
+        const resultsArr = await Promise.all(
+          pastRoundNums.map(n =>
+            getDoc(doc(db, `groups/${group.id}/results`, `round${n}`))
+              .then(d => [n, d.exists() ? d.data() : null])
+          )
+        );
+        const resultsMap = {};
+        resultsArr.forEach(([n, data]) => { if (data) resultsMap[n] = data; });
+        setResults(resultsMap);
+
+        const nicknames = {};
+        await Promise.all((group.members || []).map(async memberId => {
+          try {
+            const ud = await getDoc(doc(db, "users", memberId));
+            nicknames[memberId] = ud.data()?.nickname || "Unknown";
+          } catch { nicknames[memberId] = "Unknown"; }
+        }));
+        setMemberNicknames(nicknames);
+      } catch (e) {
+        console.error("Calendar load error:", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadAllData();
+  }, [group, currentRound, refreshTick]);
+
+  useEffect(() => {
+    const race = F1_SCHEDULE_2026[currentRound - 1];
+    if (!race) return;
+    const update = () => setCurrentCountdown(getTimeUntilLock(race));
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [currentRound]);
+
+  const getRaceStatus = (round) => {
+    if (round < currentRound) return 'past';
+    if (round === currentRound) return 'current';
+    return 'upcoming';
+  };
+
+  const pastCount = F1_SCHEDULE_2026.filter(r => getRaceStatus(r.round) === 'past').length;
+  const upcomingCount = F1_SCHEDULE_2026.filter(r => getRaceStatus(r.round) === 'upcoming').length;
+
+  const [recalculatingRound, setRecalculatingRound] = useState(null);
+  const [calcMsg, setCalcMsg] = useState({});
+
+  const recalculatePoints = async (race) => {
+    if (!group || !user) return;
+    setRecalculatingRound(race.round);
+    setCalcMsg(prev => ({ ...prev, [race.round]: '' }));
+    try {
+      const raceResults = results[race.round];
+      if (!raceResults) throw new Error("No results entered for this race yet");
+      const randSnap = await getDoc(doc(db, `groups/${group.id}/randomNumbers`, `round${race.round}`));
+      const randomNumber = randSnap.exists() ? randSnap.data().number : null;
+      const roundKey = `round${race.round}`;
+      let saved = 0;
+      for (const [uid, predData] of Object.entries(allPredictions)) {
+        const roundData = predData[roundKey];
+        if (!roundData) continue;
+        let totalPoints = 0;
+        const breakdown = {};
+        if (roundData.pole === raceResults.pole) { breakdown.pole = 1; totalPoints += 1; } else { breakdown.pole = 0; }
+        if (roundData.raceP1 === raceResults.raceP1) { breakdown.raceP1 = 1; totalPoints += 1; } else { breakdown.raceP1 = 0; }
+        if (roundData.raceP2 === raceResults.raceP2) { breakdown.raceP2 = 1; totalPoints += 1; } else { breakdown.raceP2 = 0; }
+        if (roundData.raceP3 === raceResults.raceP3) { breakdown.raceP3 = 1; totalPoints += 1; } else { breakdown.raceP3 = 0; }
+        if (race.isSprint) {
+          if (roundData.sprintQualPole === raceResults.sprintQualPole) { breakdown.sprintQualPole = 1; totalPoints += 1; } else { breakdown.sprintQualPole = 0; }
+          if (roundData.sprintP1 === raceResults.sprintP1) { breakdown.sprintP1 = 1; totalPoints += 1; } else { breakdown.sprintP1 = 0; }
+          if (roundData.sprintP2 === raceResults.sprintP2) { breakdown.sprintP2 = 1; totalPoints += 1; } else { breakdown.sprintP2 = 0; }
+          if (roundData.sprintP3 === raceResults.sprintP3) { breakdown.sprintP3 = 1; totalPoints += 1; } else { breakdown.sprintP3 = 0; }
+        }
+        if (raceResults.finisherAtPosition && randomNumber) {
+          if (roundData.finisherPosition === raceResults.finisherAtPosition) { breakdown.randomFinisherExact = 2; totalPoints += 2; }
+          else { breakdown.randomFinisherExact = 0; }
+        }
+        const scoresRef = doc(db, `groups/${group.id}/scores`, uid);
+        await setDoc(scoresRef, { [roundKey]: { totalPoints, breakdown } }, { merge: true });
+        saved++;
+      }
+      setCalcMsg(prev => ({ ...prev, [race.round]: `✅ Points saved for ${saved} players` }));
+      setRefreshTick(t => t + 1);
+    } catch (e) {
+      console.error("Recalculate error:", e);
+      setCalcMsg(prev => ({ ...prev, [race.round]: `❌ ${e.message}` }));
+    } finally {
+      setRecalculatingRound(null);
+    }
+  };
+
+  const filteredRaces = F1_SCHEDULE_2026.filter(race => {
+    if (filter === 'all') return true;
+    return getRaceStatus(race.round) === filter;
+  });
+
+  const renderPastDetails = (race) => {
+    const raceResults = results[race.round];
+    const roundKey = `round${race.round}`;
+    const roundPreds = Object.entries(allPredictions)
+      .filter(([, data]) => data[roundKey])
+      .map(([uid, data]) => ({
+        userId: uid,
+        nickname: data.nickname || memberNicknames[uid] || "Unknown",
+        pred: data[roundKey],
+        points: scores[uid]?.[roundKey]?.totalPoints ?? null,
+      }))
+      .sort((a, b) => (b.points ?? -1) - (a.points ?? -1));
+
+    const lastName = (name) => name ? name.split(' ').slice(-1)[0] : '—';
+    const mkCell = (predVal, resultVal) => {
+      if (!predVal) return <span className="text-gray-600">—</span>;
+      const hit = raceResults && predVal === resultVal;
+      return <span className={hit ? "text-green-400 font-bold" : "text-gray-300"}>{lastName(predVal)}</span>;
+    };
+
+    return (
+      <div className="mt-3 pt-3 border-t border-gray-700 space-y-3">
+        {raceResults ? (
+          <div className="bg-gray-900 rounded p-3">
+            <p className="text-xs font-bold text-yellow-400 mb-2">OFFICIAL RESULTS</p>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+              <span className="text-gray-400">Pole:</span><span className="text-white font-semibold">{raceResults.pole || "—"}</span>
+              <span className="text-gray-400">P1:</span><span className="text-white font-semibold">{raceResults.raceP1 || "—"}</span>
+              <span className="text-gray-400">P2:</span><span className="text-white font-semibold">{raceResults.raceP2 || "—"}</span>
+              <span className="text-gray-400">P3:</span><span className="text-white font-semibold">{raceResults.raceP3 || "—"}</span>
+              {raceResults.randomNumber && (
+                <>
+                  <span className="text-gray-400">P{raceResults.randomNumber}:</span>
+                  <span className="text-white font-semibold">{raceResults.finisherAtPosition || "—"}</span>
+                </>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="bg-gray-900 rounded p-3 text-center">
+            <p className="text-gray-500 text-xs">No results entered yet</p>
+          </div>
+        )}
+
+        {roundPreds.length === 0 ? (
+          <p className="text-gray-500 text-xs text-center py-2">No predictions for this race</p>
+        ) : (
+          <div>
+            <p className="text-xs font-bold text-gray-300 mb-2">PREDICTIONS & POINTS</p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-gray-700 text-gray-400">
+                    <th className="text-left py-1 pr-3">Player</th>
+                    <th className="text-center py-1 px-1">Pole</th>
+                    {race.isSprint && <th className="text-center py-1 px-1">SQ</th>}
+                    <th className="text-center py-1 px-1">P1</th>
+                    <th className="text-center py-1 px-1">P2</th>
+                    <th className="text-center py-1 px-1">P3</th>
+                    <th className="text-center py-1 px-1">Fin</th>
+                    <th className="text-center py-1 px-1 text-yellow-400 font-bold">PTS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {roundPreds.map(({ userId, nickname, pred, points }) => (
+                    <tr key={userId} className="border-b border-gray-800 hover:bg-gray-800/50">
+                      <td className="py-1 pr-3 font-semibold text-white whitespace-nowrap">{nickname}</td>
+                      <td className="py-1 px-1 text-center">{mkCell(pred.pole, raceResults?.pole)}</td>
+                      {race.isSprint && <td className="py-1 px-1 text-center">{mkCell(pred.sprintQualPole, raceResults?.sprintQualPole)}</td>}
+                      <td className="py-1 px-1 text-center">{mkCell(pred.raceP1, raceResults?.raceP1)}</td>
+                      <td className="py-1 px-1 text-center">{mkCell(pred.raceP2, raceResults?.raceP2)}</td>
+                      <td className="py-1 px-1 text-center">{mkCell(pred.raceP3, raceResults?.raceP3)}</td>
+                      <td className="py-1 px-1 text-center">
+                        {pred.finisherPosition
+                          ? <span className={raceResults && pred.finisherPosition === raceResults.finisherAtPosition ? "text-green-400 font-bold" : "text-gray-300"}>{lastName(pred.finisherPosition)}</span>
+                          : <span className="text-gray-600">—</span>}
+                      </td>
+                      <td className="py-1 px-1 text-center font-black text-base">
+                        <span className={points !== null ? "text-yellow-400" : "text-gray-500"}>
+                          {points !== null ? points : "—"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {user && group && user.uid === group.admin && raceResults && (
+          <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-700/50">
+            <span className="text-xs text-gray-500">
+              {calcMsg[race.round] || (roundPreds.some(p => p.points !== null) ? '' : 'No scores calculated yet')}
+            </span>
+            <button
+              onClick={() => recalculatePoints(race)}
+              disabled={recalculatingRound === race.round}
+              className="px-3 py-1 bg-blue-800 hover:bg-blue-700 text-white text-xs rounded font-bold transition disabled:opacity-50 shrink-0 ml-2"
+            >
+              {recalculatingRound === race.round ? 'Calculating...' : roundPreds.some(p => p.points !== null) ? '↻ Recalculate' : '⚡ Calculate Points'}
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderCurrentDetails = (race) => {
+    const locked = isEditLocked(race);
+    return (
+      <div className="mt-3 pt-3 border-t border-gray-700">
+        {locked ? (
+          <div className="bg-orange-900/30 border border-orange-600/50 rounded p-3 text-center">
+            <p className="text-orange-400 font-bold text-sm">🔒 Predictions Locked — Race Underway</p>
+          </div>
+        ) : (
+          <div className="bg-green-900/30 border border-green-600/50 rounded p-3 space-y-1">
+            <p className="text-green-400 font-bold text-sm">🟢 Open for Predictions</p>
+            <p className="text-xs text-gray-300">Locks in: <span className="text-red-400 font-bold">{currentCountdown}</span> (5 hrs before race start)</p>
+            <p className="text-xs text-gray-500">Go to Predictions tab to submit</p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderUpcomingDetails = (race) => {
+    const lockTime = new Date(new Date(race.raceStart).getTime() - 5 * 60 * 60 * 1000);
+    const fmtOpts = { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' };
+    return (
+      <div className="mt-3 pt-3 border-t border-gray-700">
+        <div className="bg-gray-900 rounded p-3 text-xs text-gray-400 space-y-1">
+          <p>Race start: <span className="text-gray-200">{new Date(race.raceStart).toLocaleString('en-US', fmtOpts)}</span></p>
+          <p>Predictions lock: <span className="text-gray-200">{lockTime.toLocaleString('en-US', fmtOpts)}</span></p>
+        </div>
+      </div>
+    );
+  };
+
+  if (loading) {
+    return (
+      <div className="bg-gray-900 border border-red-600/50 rounded-lg p-6">
+        <h2 className="text-2xl font-bold mb-6" style={{ fontFamily: "'Orbitron'" }}>🗓️ 2026 F1 CALENDAR</h2>
+        <div className="text-center py-12 text-gray-400">
+          <div className="animate-spin inline-block text-4xl mb-4">⏳</div>
+          <p>Loading race data...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-gray-900 border border-red-600/50 rounded-lg p-6">
-      <h2 className="text-2xl font-bold mb-6" style={{ fontFamily: "'Orbitron'" }}>🗓️ 2026 F1 CALENDAR</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-bold" style={{ fontFamily: "'Orbitron'" }}>🗓️ 2026 F1 CALENDAR</h2>
+        <button
+          onClick={() => setRefreshTick(t => t + 1)}
+          className="px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded border border-gray-700 transition"
+        >
+          ↻ Refresh
+        </button>
+      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {F1_SCHEDULE_2026.map((race) => {
-          const isActive = race.round === currentRound;
+      <div className="flex gap-2 mb-5 flex-wrap">
+        {[
+          { key: 'all', label: 'All (24)' },
+          { key: 'past', label: `Past (${pastCount})` },
+          { key: 'current', label: 'Current' },
+          { key: 'upcoming', label: `Upcoming (${upcomingCount})` },
+        ].map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => setFilter(key)}
+            className={`px-3 py-1 rounded text-sm font-bold transition ${filter === key ? 'bg-red-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="space-y-2">
+        {filteredRaces.map((race) => {
+          const status = getRaceStatus(race.round);
+          const isExpanded = expandedRound === race.round;
+          const myPoints = user ? scores[user.uid]?.[`round${race.round}`]?.totalPoints : null;
+
+          const statusBadge = {
+            past: <span className="px-2 py-0.5 rounded text-xs font-bold bg-gray-700 text-gray-300">PAST</span>,
+            current: <span className="px-2 py-0.5 rounded text-xs font-bold bg-green-700 text-green-200 animate-pulse">CURRENT</span>,
+            upcoming: <span className="px-2 py-0.5 rounded text-xs font-bold bg-blue-900 text-blue-300">UPCOMING</span>,
+          }[status];
+
+          const borderClass = status === 'current' ? 'border-red-500' : 'border-gray-700';
+          const bgClass = status === 'current' ? 'bg-red-950/20' : 'bg-gray-800';
+
           return (
-            <div
-              key={race.round}
-              className={`p-4 rounded-lg border-2 transition ${isActive
-                ? 'border-red-600 bg-red-950/30'
-                : 'border-gray-700 bg-gray-800 hover:border-red-600/50'
-                }`}
-            >
-              <div className="flex justify-between items-start mb-2">
-                <div>
-                  <h3 className="font-bold text-white text-lg">{race.name}</h3>
-                  <p className="text-sm text-gray-400">{race.location}, {race.country}</p>
+            <div key={race.round} className={`border rounded-lg overflow-hidden ${borderClass} ${bgClass}`}>
+              <button
+                onClick={() => setExpandedRound(prev => prev === race.round ? null : race.round)}
+                className="w-full text-left p-4 flex items-center gap-3 hover:bg-white/5 transition"
+              >
+                <span className="text-red-600 font-black text-base w-8 shrink-0">R{race.round}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-white">{race.name}</span>
+                    {race.isSprint && <span className="px-1.5 py-0.5 bg-yellow-600 text-white text-xs rounded font-bold">SPRINT</span>}
+                    {statusBadge}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {race.location} · {new Date(race.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </p>
                 </div>
-                <div className="text-right">
-                  <p className="text-2xl font-black text-red-600">R{race.round}</p>
-                  {race.isSprint && <p className="text-xs bg-yellow-600 text-white px-2 py-1 rounded mt-1">SPRINT</p>}
-                  {isActive && <p className="text-xs bg-red-600 text-white px-2 py-1 rounded mt-1">ACTIVE</p>}
-                </div>
-              </div>
+                {status === 'past' && myPoints !== null && myPoints !== undefined && (
+                  <div className="text-right shrink-0 mr-1">
+                    <span className="text-yellow-400 font-black text-lg">{myPoints}</span>
+                    <span className="text-gray-500 text-xs ml-0.5">pts</span>
+                  </div>
+                )}
+                {status === 'current' && (
+                  <div className="text-right shrink-0 mr-1">
+                    <span className="text-green-400 text-xs font-bold">{currentCountdown}</span>
+                  </div>
+                )}
+                <span className="text-gray-500 shrink-0 text-xs">{isExpanded ? '▲' : '▼'}</span>
+              </button>
 
-              <div className="border-t border-gray-700 pt-2 mt-2">
-                <p className="text-xs text-gray-400">
-                  Race: {new Date(race.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                </p>
-                <p className="text-xs text-gray-400">
-                  FP1: {new Date(race.fp1).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                </p>
-              </div>
+              {isExpanded && (
+                <div className="px-4 pb-4">
+                  {status === 'past' && renderPastDetails(race)}
+                  {status === 'current' && renderCurrentDetails(race)}
+                  {status === 'upcoming' && renderUpcomingDetails(race)}
+                </div>
+              )}
             </div>
           );
         })}
