@@ -1062,10 +1062,72 @@ function HowToPlayView() {
   );
 }
 
+// Fetch 2026 schedule from Jolpica (Ergast replacement). Falls back to hardcoded silently.
+function useF1ApiSchedule(season = 2026) {
+  const [apiData, setApiData] = useState(null);
+  const [apiStatus, setApiStatus] = useState('loading'); // 'loading' | 'ok' | 'error'
+
+  useEffect(() => {
+    const toIso = (obj) => obj?.date && obj?.time ? `${obj.date}T${obj.time}` : null;
+    fetch(`https://api.jolpi.ca/ergast/f1/${season}.json`)
+      .then(r => { if (!r.ok) throw new Error('API error'); return r.json(); })
+      .then(data => {
+        const races = data?.MRData?.RaceTable?.Races;
+        if (!races?.length) { setApiStatus('error'); return; }
+        const schedule = {};
+        races.forEach(race => {
+          const round = parseInt(race.round);
+          schedule[round] = {
+            raceStart: toIso(race),
+            sprintStart: toIso(race.Sprint),
+            sprintQualifyingStart: toIso(race.SprintQualifying),
+            qualifyingStart: toIso(race.Qualifying),
+          };
+        });
+        setApiData(schedule);
+        setApiStatus('ok');
+      })
+      .catch(() => setApiStatus('error'));
+  }, [season]);
+
+  return { apiData, apiStatus };
+}
+
+// Session row: label + UTC time + live status badge
+function SessionRow({ label, startIso, durationMs, nowTs }) {
+  if (!startIso) return null;
+  const startMs = new Date(startIso).getTime();
+  const endMs = startMs + durationMs;
+  const status = nowTs < startMs ? 'upcoming' : nowTs < endMs ? 'live' : 'done';
+  const cfg = {
+    upcoming: { text: 'Upcoming',   cls: 'bg-blue-900/40 text-blue-400' },
+    live:     { text: '🔴 LIVE',    cls: 'bg-green-900/40 text-green-400' },
+    done:     { text: 'Finished',   cls: 'bg-gray-700/50 text-gray-500' },
+  }[status];
+  const timeStr = new Date(startIso).toLocaleString('en-GB', {
+    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'UTC'
+  }) + ' UTC';
+  return (
+    <div className="flex items-center justify-between text-sm py-1">
+      <span className="text-gray-300 font-medium w-32">{label}</span>
+      <span className="text-gray-400">{timeStr}</span>
+      <span className={`text-xs font-bold px-2 py-0.5 rounded ${cfg.cls}`}>{cfg.text}</span>
+    </div>
+  );
+}
+
 // RESULTS VIEW - ADMIN ENTRY
 function ResultsView({ group, user, currentRound }) {
   const [selectedRound, setSelectedRound] = useState(currentRound);
   const race = F1_SCHEDULE_2026[selectedRound - 1];
+  const { apiData, apiStatus } = useF1ApiSchedule(2026);
+
+  // Merge: API times win, hardcoded as fallback
+  const apiRound = apiData?.[selectedRound];
+  const raceStartStr = apiRound?.raceStart ?? race?.raceStart ?? null;
+  const sprintStartStr = apiRound?.sprintStart ?? null;
+  const sprintQualifyingStartStr = apiRound?.sprintQualifyingStart ?? null;
+  const usingApiData = apiStatus === 'ok' && apiRound?.raceStart != null;
   const [results, setResults] = useState({
     pole: "",
     raceP1: "",
@@ -1264,9 +1326,9 @@ function ResultsView({ group, user, currentRound }) {
 
   const isAdmin = group && group.admin === user.uid;
 
-  // 24-hour edit lock — all comparisons use plain timestamps (ms) to avoid Date object issues
-  const lockTimeMs = race?.raceStart
-    ? new Date(race.raceStart).getTime() + 24 * 60 * 60 * 1000
+  // 24-hour edit lock — uses merged raceStartStr (API wins, hardcoded fallback)
+  const lockTimeMs = raceStartStr
+    ? new Date(raceStartStr).getTime() + 24 * 60 * 60 * 1000
     : null;
   const lockTime = lockTimeMs ? new Date(lockTimeMs) : null;
   const isLocked = lockTimeMs !== null ? nowTs > lockTimeMs : false;
@@ -1309,20 +1371,41 @@ function ResultsView({ group, user, currentRound }) {
 
         <p className="text-gray-400 mb-4">{race?.name} — Round {selectedRound}{selectedRound < currentRound ? ' (Past Race)' : ''}</p>
 
+        {/* Session schedule card */}
+        {raceStartStr && (
+          <div className="bg-gray-800 border border-gray-700 rounded p-4 mb-5">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-bold text-gray-300 tracking-wide">SESSION SCHEDULE</p>
+              <span className={`text-xs px-2 py-0.5 rounded font-medium ${usingApiData ? 'bg-green-900/40 text-green-500' : 'bg-gray-700 text-gray-500'}`}>
+                {apiStatus === 'loading' ? '⏳ Fetching API...' : usingApiData ? '● Jolpica API' : '○ Hardcoded'}
+              </span>
+            </div>
+            <div className="divide-y divide-gray-700/50">
+              {sprintQualifyingStartStr && (
+                <SessionRow label="Sprint Qualifying" startIso={sprintQualifyingStartStr} durationMs={60 * 60 * 1000} nowTs={nowTs} />
+              )}
+              {sprintStartStr && (
+                <SessionRow label="Sprint Race" startIso={sprintStartStr} durationMs={45 * 60 * 1000} nowTs={nowTs} />
+              )}
+              <SessionRow label="Race" startIso={raceStartStr} durationMs={2 * 60 * 60 * 1000} nowTs={nowTs} />
+            </div>
+          </div>
+        )}
+
         {/* Lock status banner */}
         {isAdmin && lockTime && (
           isLocked ? (
             <div className="bg-red-900/40 border border-red-500 p-4 rounded mb-5">
               <p className="text-red-400 font-bold text-base">⛔ RESULTS LOCKED</p>
               <p className="text-red-300 text-sm mt-1">
-                This race's results cannot be edited. The 24-hour editing window closed on {formatUTC(lockTime)}.
+                The 24-hour editing window closed on {formatUTC(lockTime)}.
               </p>
             </div>
           ) : (
             <div className="bg-green-900/30 border border-green-600/50 p-4 rounded mb-5">
               <p className="text-green-400 font-bold text-base">✅ RESULTS EDITABLE</p>
               <p className="text-green-300 text-sm mt-1">
-                You can edit results until {formatUTC(lockTime)}{' '}
+                Edit window closes {formatUTC(lockTime)}{' '}
                 ({msUntilLock > 0 ? `${hoursUntilLock}h ${minutesUntilLock}m remaining` : 'closing soon'})
               </p>
             </div>
