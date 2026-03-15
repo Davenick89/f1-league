@@ -848,6 +848,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
                 <th className="text-left p-2 font-bold">Player</th>
                 <th className="text-center p-1 font-bold">Pole</th>
                 {race.isSprint && <th className="text-center p-1 font-bold">SQ</th>}
+                {race.isSprint && <th className="text-center p-1 font-bold">SR</th>}
                 <th className="text-center p-1 font-bold">P1</th>
                 <th className="text-center p-1 font-bold">P2</th>
                 <th className="text-center p-1 font-bold">P3</th>
@@ -864,6 +865,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
                     <td className="p-2 font-bold text-white">{p.nickname}</td>
                     <td className="p-1 text-center text-yellow-300">{p.pole ? p.pole.split(' ')[0] : "-"}</td>
                     {race.isSprint && <td className="p-1 text-center text-yellow-300">{p.sprintQualPole ? p.sprintQualPole.split(' ')[0] : "-"}</td>}
+                    {race.isSprint && <td className="p-1 text-center text-orange-300">{p.sprintP1 ? p.sprintP1.split(' ')[0] : "-"}</td>}
                     <td className="p-1 text-center text-blue-300">{p.raceP1 ? p.raceP1.split(' ')[0] : "-"}</td>
                     <td className="p-1 text-center text-blue-300">{p.raceP2 ? p.raceP2.split(' ')[0] : "-"}</td>
                     <td className="p-1 text-center text-blue-300">{p.raceP3 ? p.raceP3.split(' ')[0] : "-"}</td>
@@ -1130,6 +1132,8 @@ function ResultsView({ group, user, currentRound }) {
   const usingApiData = apiStatus === 'ok' && apiRound?.raceStart != null;
   const [results, setResults] = useState({
     pole: "",
+    sprintQualPole: "",
+    sprintP1: "",
     raceP1: "",
     raceP2: "",
     raceP3: "",
@@ -1153,7 +1157,7 @@ function ResultsView({ group, user, currentRound }) {
     if (!group) return;
 
     // Clear stale data from previous round
-    setResults({ pole: "", raceP1: "", raceP2: "", raceP3: "", fastestLap: "", finisherAtPosition: "" });
+    setResults({ pole: "", sprintQualPole: "", sprintP1: "", raceP1: "", raceP2: "", raceP3: "", fastestLap: "", finisherAtPosition: "" });
     setExistingResults(null);
     setRandomNumber(null);
 
@@ -1206,6 +1210,7 @@ function ResultsView({ group, user, currentRound }) {
       const resultsRef = doc(db, `groups/${group.id}/results`, `round${selectedRound}`);
 
       await setDoc(resultsRef, {
+        ...(race.isSprint ? { sprintQualPole: results.sprintQualPole || null, sprintP1: results.sprintP1 || null } : {}),
         pole: results.pole,
         raceP1: results.raceP1,
         raceP2: results.raceP2,
@@ -1255,6 +1260,22 @@ function ResultsView({ group, user, currentRound }) {
           totalPoints += 1;
         } else {
           breakdown.pole = 0;
+        }
+
+        // Sprint (if sprint weekend)
+        if (race.isSprint) {
+          if (roundData.sprintQualPole === results.sprintQualPole) {
+            breakdown.sprintQualPole = 1;
+            totalPoints += 1;
+          } else {
+            breakdown.sprintQualPole = 0;
+          }
+          if (roundData.sprintP1 === results.sprintP1) {
+            breakdown.sprintP1 = 1;
+            totalPoints += 1;
+          } else {
+            breakdown.sprintP1 = 0;
+          }
         }
 
         // Race Podium
@@ -1456,6 +1477,35 @@ function ResultsView({ group, user, currentRound }) {
               <h3 className="font-bold text-lg">QUALIFYING & RACE RESULTS</h3>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {race.isSprint && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-bold mb-2">Sprint Qualifying Winner</label>
+                      <select
+                        value={results.sprintQualPole}
+                        onChange={(e) => setResults({ ...results, sprintQualPole: e.target.value })}
+                        disabled={isLocked}
+                        className="w-full bg-gray-800 border border-yellow-600/50 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <option value="">Select Driver</option>
+                        {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold mb-2">Sprint Race Winner</label>
+                      <select
+                        value={results.sprintP1}
+                        onChange={(e) => setResults({ ...results, sprintP1: e.target.value })}
+                        disabled={isLocked}
+                        className="w-full bg-gray-800 border border-orange-600/50 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <option value="">Select Driver</option>
+                        {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
+
                 <div>
                   <label className="block text-sm font-bold mb-2">Pole Position</label>
                   <select
