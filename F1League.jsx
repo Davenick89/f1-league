@@ -847,8 +847,10 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
               <tr className="border-b-2 border-red-600">
                 <th className="text-left p-2 font-bold">Player</th>
                 <th className="text-center p-1 font-bold">Pole</th>
-                {race.isSprint && <th className="text-center p-1 font-bold">SQ</th>}
-                {race.isSprint && <th className="text-center p-1 font-bold">SR</th>}
+                {race.isSprint && <th className="text-center p-1 font-bold text-yellow-400">SQ</th>}
+                {race.isSprint && <th className="text-center p-1 font-bold text-orange-400">SP1</th>}
+                {race.isSprint && <th className="text-center p-1 font-bold text-orange-400">SP2</th>}
+                {race.isSprint && <th className="text-center p-1 font-bold text-orange-400">SP3</th>}
                 <th className="text-center p-1 font-bold">P1</th>
                 <th className="text-center p-1 font-bold">P2</th>
                 <th className="text-center p-1 font-bold">P3</th>
@@ -866,6 +868,8 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
                     <td className="p-1 text-center text-yellow-300">{p.pole ? p.pole.split(' ')[0] : "-"}</td>
                     {race.isSprint && <td className="p-1 text-center text-yellow-300">{p.sprintQualPole ? p.sprintQualPole.split(' ')[0] : "-"}</td>}
                     {race.isSprint && <td className="p-1 text-center text-orange-300">{p.sprintP1 ? p.sprintP1.split(' ')[0] : "-"}</td>}
+                    {race.isSprint && <td className="p-1 text-center text-orange-300">{p.sprintP2 ? p.sprintP2.split(' ')[0] : "-"}</td>}
+                    {race.isSprint && <td className="p-1 text-center text-orange-300">{p.sprintP3 ? p.sprintP3.split(' ')[0] : "-"}</td>}
                     <td className="p-1 text-center text-blue-300">{p.raceP1 ? p.raceP1.split(' ')[0] : "-"}</td>
                     <td className="p-1 text-center text-blue-300">{p.raceP2 ? p.raceP2.split(' ')[0] : "-"}</td>
                     <td className="p-1 text-center text-blue-300">{p.raceP3 ? p.raceP3.split(' ')[0] : "-"}</td>
@@ -1134,6 +1138,8 @@ function ResultsView({ group, user, currentRound }) {
     pole: "",
     sprintQualPole: "",
     sprintP1: "",
+    sprintP2: "",
+    sprintP3: "",
     raceP1: "",
     raceP2: "",
     raceP3: "",
@@ -1157,7 +1163,7 @@ function ResultsView({ group, user, currentRound }) {
     if (!group) return;
 
     // Clear stale data from previous round
-    setResults({ pole: "", sprintQualPole: "", sprintP1: "", raceP1: "", raceP2: "", raceP3: "", fastestLap: "", finisherAtPosition: "" });
+    setResults({ pole: "", sprintQualPole: "", sprintP1: "", sprintP2: "", sprintP3: "", raceP1: "", raceP2: "", raceP3: "", fastestLap: "", finisherAtPosition: "" });
     setExistingResults(null);
     setRandomNumber(null);
 
@@ -1210,7 +1216,7 @@ function ResultsView({ group, user, currentRound }) {
       const resultsRef = doc(db, `groups/${group.id}/results`, `round${selectedRound}`);
 
       await setDoc(resultsRef, {
-        ...(race.isSprint ? { sprintQualPole: results.sprintQualPole || null, sprintP1: results.sprintP1 || null } : {}),
+        ...(race.isSprint ? { sprintQualPole: results.sprintQualPole || null, sprintP1: results.sprintP1 || null, sprintP2: results.sprintP2 || null, sprintP3: results.sprintP3 || null } : {}),
         pole: results.pole,
         raceP1: results.raceP1,
         raceP2: results.raceP2,
@@ -1275,6 +1281,18 @@ function ResultsView({ group, user, currentRound }) {
             totalPoints += 1;
           } else {
             breakdown.sprintP1 = 0;
+          }
+          if (roundData.sprintP2 === results.sprintP2) {
+            breakdown.sprintP2 = 1;
+            totalPoints += 1;
+          } else {
+            breakdown.sprintP2 = 0;
+          }
+          if (roundData.sprintP3 === results.sprintP3) {
+            breakdown.sprintP3 = 1;
+            totalPoints += 1;
+          } else {
+            breakdown.sprintP3 = 0;
           }
         }
 
@@ -1473,14 +1491,16 @@ function ResultsView({ group, user, currentRound }) {
               </div>
             )}
 
-            <div className="space-y-4 mb-6">
+            <div className="space-y-6 mb-6">
               <h3 className="font-bold text-lg">QUALIFYING & RACE RESULTS</h3>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {race.isSprint && (
-                  <>
+              {/* Sprint sections — only for sprint weekends */}
+              {race.isSprint && (
+                <>
+                  <div className="border border-yellow-600/50 rounded-lg p-4 bg-yellow-900/10">
+                    <p className="text-xs font-bold text-yellow-400 mb-3 tracking-wide">🏁 SPRINT QUALIFYING</p>
                     <div>
-                      <label className="block text-sm font-bold mb-2">Sprint Qualifying Winner</label>
+                      <label className="block text-sm font-bold mb-2">SQ Pole (Sprint Qualifying Winner)</label>
                       <select
                         value={results.sprintQualPole}
                         onChange={(e) => setResults({ ...results, sprintQualPole: e.target.value })}
@@ -1491,73 +1511,114 @@ function ResultsView({ group, user, currentRound }) {
                         {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
                       </select>
                     </div>
-                    <div>
-                      <label className="block text-sm font-bold mb-2">Sprint Race Winner</label>
-                      <select
-                        value={results.sprintP1}
-                        onChange={(e) => setResults({ ...results, sprintP1: e.target.value })}
-                        disabled={isLocked}
-                        className="w-full bg-gray-800 border border-orange-600/50 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <option value="">Select Driver</option>
-                        {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
-                      </select>
-                    </div>
-                  </>
-                )}
+                  </div>
 
+                  <div className="border border-orange-600/50 rounded-lg p-4 bg-orange-900/10">
+                    <p className="text-xs font-bold text-orange-400 mb-3 tracking-wide">🏁 SPRINT RACE</p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-bold mb-2">Sprint P1 (Winner)</label>
+                        <select
+                          value={results.sprintP1}
+                          onChange={(e) => setResults({ ...results, sprintP1: e.target.value })}
+                          disabled={isLocked}
+                          className="w-full bg-gray-800 border border-orange-600/50 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <option value="">Select Driver</option>
+                          {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-bold mb-2">Sprint P2</label>
+                        <select
+                          value={results.sprintP2}
+                          onChange={(e) => setResults({ ...results, sprintP2: e.target.value })}
+                          disabled={isLocked}
+                          className="w-full bg-gray-800 border border-orange-600/50 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <option value="">Select Driver</option>
+                          {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-bold mb-2">Sprint P3</label>
+                        <select
+                          value={results.sprintP3}
+                          onChange={(e) => setResults({ ...results, sprintP3: e.target.value })}
+                          disabled={isLocked}
+                          className="w-full bg-gray-800 border border-orange-600/50 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <option value="">Select Driver</option>
+                          {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <hr className="border-gray-700" />
+                </>
+              )}
+
+              {/* Main race sections — always visible */}
+              <div className="border border-blue-600/50 rounded-lg p-4 bg-blue-900/10">
+                <p className="text-xs font-bold text-blue-400 mb-3 tracking-wide">🏁 MAIN RACE QUALIFYING</p>
                 <div>
                   <label className="block text-sm font-bold mb-2">Pole Position</label>
                   <select
                     value={results.pole}
                     onChange={(e) => setResults({ ...results, pole: e.target.value })}
                     disabled={isLocked}
-                    className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full bg-gray-800 border border-blue-600/50 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="">Select Driver</option>
                     {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
                 </div>
+              </div>
 
-                <div>
-                  <label className="block text-sm font-bold mb-2">Race P1 (Winner)</label>
-                  <select
-                    value={results.raceP1}
-                    onChange={(e) => setResults({ ...results, raceP1: e.target.value })}
-                    disabled={isLocked}
-                    className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <option value="">Select Driver</option>
-                    {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
-                  </select>
+              <div className="border border-blue-600/50 rounded-lg p-4 bg-blue-900/10">
+                <p className="text-xs font-bold text-blue-400 mb-3 tracking-wide">🏁 MAIN RACE</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold mb-2">Race P1 (Winner)</label>
+                    <select
+                      value={results.raceP1}
+                      onChange={(e) => setResults({ ...results, raceP1: e.target.value })}
+                      disabled={isLocked}
+                      className="w-full bg-gray-800 border border-blue-600/50 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <option value="">Select Driver</option>
+                      {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold mb-2">Race P2</label>
+                    <select
+                      value={results.raceP2}
+                      onChange={(e) => setResults({ ...results, raceP2: e.target.value })}
+                      disabled={isLocked}
+                      className="w-full bg-gray-800 border border-blue-600/50 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <option value="">Select Driver</option>
+                      {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold mb-2">Race P3</label>
+                    <select
+                      value={results.raceP3}
+                      onChange={(e) => setResults({ ...results, raceP3: e.target.value })}
+                      disabled={isLocked}
+                      className="w-full bg-gray-800 border border-blue-600/50 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <option value="">Select Driver</option>
+                      {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </div>
                 </div>
+              </div>
 
-                <div>
-                  <label className="block text-sm font-bold mb-2">Race P2</label>
-                  <select
-                    value={results.raceP2}
-                    onChange={(e) => setResults({ ...results, raceP2: e.target.value })}
-                    disabled={isLocked}
-                    className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <option value="">Select Driver</option>
-                    {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-bold mb-2">Race P3</label>
-                  <select
-                    value={results.raceP3}
-                    onChange={(e) => setResults({ ...results, raceP3: e.target.value })}
-                    disabled={isLocked}
-                    className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <option value="">Select Driver</option>
-                    {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
-                  </select>
-                </div>
-
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-bold mb-2">Fastest Lap (Optional)</label>
                   <select
@@ -1573,7 +1634,7 @@ function ResultsView({ group, user, currentRound }) {
 
                 {randomNumber && (
                   <div>
-                    <label className="block text-sm font-bold mb-2">Driver at P{randomNumber}</label>
+                    <label className="block text-sm font-bold mb-2">🎲 Driver at P{randomNumber}</label>
                     <select
                       value={results.finisherAtPosition}
                       onChange={(e) => setResults({ ...results, finisherAtPosition: e.target.value })}
