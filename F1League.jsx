@@ -666,6 +666,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
         [`round${currentRound}`]: {
           ...predictions,
           randomNumber: randomNumber,
+          lastEditTime: new Date().toISOString(),
           createdAt: serverTimestamp()
         }
       }, { merge: true });
@@ -678,6 +679,11 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
       console.error("Error:", error);
       setMessage("❌ Error saving");
     }
+  };
+
+  const formatTime = (iso) => {
+    if (!iso) return "-";
+    return new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
   };
 
   // Calculate points for a prediction
@@ -886,6 +892,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
                 <th className="text-center p-1 font-bold">P2</th>
                 <th className="text-center p-1 font-bold">P3</th>
                 <th className="text-center p-1 font-bold">R#</th>
+                <th className="text-center p-1 font-bold text-gray-400">Edited</th>
                 <th className="text-center p-1 font-bold bg-green-900">PTS</th>
                 <th className="text-center p-1 font-bold bg-yellow-900">TOT</th>
               </tr>
@@ -905,6 +912,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
                     <td className="p-1 text-center text-blue-300">{p.raceP2 ? p.raceP2.split(' ')[0] : "-"}</td>
                     <td className="p-1 text-center text-blue-300">{p.raceP3 ? p.raceP3.split(' ')[0] : "-"}</td>
                     <td className="p-1 text-center text-green-300">{p.finisherPosition ? p.finisherPosition.split(' ')[0] : "-"}</td>
+                    <td className="p-1 text-center whitespace-nowrap" style={{ color: '#999', fontSize: '0.7rem' }}>{formatTime(p.lastEditTime)}</td>
                     <td className="p-1 text-center font-bold bg-green-900 text-white">{pts}</td>
                     <td className="p-1 text-center font-bold bg-yellow-900 text-white">{pts}</td>
                   </tr>
@@ -1181,6 +1189,7 @@ function ResultsView({ group, user, currentRound }) {
   const [loading, setLoading] = useState(false);
   const [existingResults, setExistingResults] = useState(null);
   const [nowTs, setNowTs] = useState(() => Date.now());
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
 
   // Update timestamp every minute for countdown accuracy
   useEffect(() => {
@@ -1341,6 +1350,48 @@ function ResultsView({ group, user, currentRound }) {
     } catch (error) {
       console.error("Error calculating scores:", error);
       throw error;
+    }
+  };
+
+  const handleEndWeekend = async () => {
+    setShowEndConfirm(false);
+    setLoading(true);
+    try {
+      const nextRound = selectedRound + 1;
+      const statusRef = (round) => doc(db, `groups/${group.id}/raceStatus`, `round${round}`);
+
+      await setDoc(statusRef(selectedRound), {
+        status: 'PAST',
+        isClosed: true,
+        closedAt: new Date().toISOString(),
+        closedBy: user.uid
+      }, { merge: true });
+
+      if (nextRound <= 24) {
+        await setDoc(statusRef(nextRound), {
+          status: 'CURRENT',
+          isPredictionOpen: true,
+          openedAt: new Date().toISOString()
+        }, { merge: true });
+      }
+
+      // Log the event
+      await setDoc(doc(db, `groups/${group.id}/systemLogs`, `endWeekend_${selectedRound}_${Date.now()}`), {
+        event: 'END_WEEKEND',
+        closedRound: selectedRound,
+        openedRound: nextRound <= 24 ? nextRound : null,
+        triggeredBy: user.uid,
+        timestamp: new Date().toISOString()
+      });
+
+      const nextRaceName = nextRound <= 24 ? F1_SCHEDULE_2026[nextRound - 1]?.name : null;
+      const nextMsg = nextRaceName ? ` ${nextRaceName} (R${nextRound}) is now open!` : " Season complete!";
+      setMessage(`✅ Weekend closed: Round ${selectedRound} locked.${nextMsg}`);
+      setTimeout(() => { setMessage(""); window.location.reload(); }, 3000);
+    } catch (err) {
+      console.error("End weekend error:", err);
+      setMessage("❌ Error closing weekend");
+      setLoading(false);
     }
   };
 
@@ -1615,17 +1666,60 @@ function ResultsView({ group, user, currentRound }) {
               )}
             </div>
 
-            <button
-              onClick={handleSaveResults}
-              disabled={loading || isLocked}
-              className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white font-bold py-3 rounded-lg disabled:cursor-not-allowed"
-              title={isLocked ? "Results editing locked — 24 hours have passed since race end" : "Save results and calculate points for all players"}
-            >
-              {loading ? "Saving..." : isLocked ? "🔒 RESULTS LOCKED" : "SAVE RESULTS & CALCULATE POINTS"}
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={handleSaveResults}
+                disabled={loading || isLocked}
+                className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white font-bold py-3 rounded-lg disabled:cursor-not-allowed"
+                title={isLocked ? "Results editing locked — 24 hours have passed since race end" : "Save results and calculate points for all players"}
+              >
+                {loading ? "Saving..." : isLocked ? "🔒 RESULTS LOCKED" : "SAVE & CALCULATE POINTS"}
+              </button>
+
+              {isAdmin && existingResults && !isLocked && (
+                <button
+                  onClick={() => setShowEndConfirm(true)}
+                  disabled={loading}
+                  className="flex-1 bg-gradient-to-r from-red-700 to-red-900 hover:from-red-800 hover:to-red-950 hover:-translate-y-0.5 disabled:bg-gray-600 disabled:transform-none text-white font-bold py-3 rounded-lg transition-all disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  🏁 END WEEKEND
+                </button>
+              )}
+            </div>
 
             {message && (
               <p className="text-center text-sm mt-3 text-green-400">{message}</p>
+            )}
+
+            {/* End Weekend confirmation dialog */}
+            {showEndConfirm && (
+              <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+                <div className="bg-gray-900 border-2 border-red-600 rounded-lg p-6 w-full max-w-md">
+                  <h3 className="text-xl font-bold text-white mb-3">Close Round {selectedRound}?</h3>
+                  <p className="text-gray-300 text-sm mb-4">
+                    This will close Round {selectedRound} ({race?.name}) and open Round {selectedRound + 1}{selectedRound + 1 <= 24 ? ` (${F1_SCHEDULE_2026[selectedRound]?.name})` : ""} for predictions.
+                  </p>
+                  <ul className="text-sm text-gray-400 space-y-1 mb-6 ml-2">
+                    <li>✓ Lock Round {selectedRound} permanently</li>
+                    <li>✓ Open Round {selectedRound + 1} for predictions</li>
+                    <li>✓ Update calendar status</li>
+                  </ul>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleEndWeekend}
+                      className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded-lg"
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      onClick={() => setShowEndConfirm(false)}
+                      className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 rounded-lg"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
           </>
         )}
