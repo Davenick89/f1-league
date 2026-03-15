@@ -731,7 +731,9 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
     const distances = allPredictions.map(getDistance).filter(d => d !== Infinity);
     const minDistance = distances.length > 0 ? Math.min(...distances) : Infinity;
     const myDistance = getDistance(pred);
-    if (myDistance === minDistance && myDistance !== Infinity) points += 1;
+    if (myDistance === minDistance && myDistance !== Infinity) {
+      points += myDistance === 0 ? 2 : 1;
+    }
 
     return points;
   };
@@ -934,13 +936,13 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
               raceP1: ex(p.raceP1, allResults.raceP1),
               raceP2: ex(p.raceP2, allResults.raceP2),
               raceP3: ex(p.raceP3, allResults.raceP3),
-              randomFinisher: (d === minDist && d !== Infinity) ? 1 : 0,
+              randomFinisher: (d === minDist && d !== Infinity) ? (d === 0 ? 2 : 1) : 0,
             };
           };
 
           const fn = (name) => name ? name.split(' ')[0] : '-';
           const PointCell = ({ name, pts }) => (
-            <td className={`p-1 text-center font-semibold text-xs ${pts === 1 ? 'bg-green-900/60 text-green-400' : 'bg-red-900/40 text-red-400'}`}>
+            <td className={`p-1 text-center font-semibold text-xs ${pts > 0 ? 'bg-green-900/60 text-green-400' : 'bg-red-900/40 text-red-400'}`}>
               {fn(name)}/{pts ?? 0}
             </td>
           );
@@ -1452,12 +1454,15 @@ function ResultsView({ group, user, currentRound }) {
         breakdown.raceP3 = exact(roundData.raceP3, results.raceP3);
         totalPoints += breakdown.raceP3;
 
-        // Competitive R# bonus: +1 only to closest player(s)
+        // Competitive R# bonus: exact=+2, closest non-exact=+1, others=0
         const isClosest = distance === minDistance && distance !== Infinity;
-        breakdown.randomFinisher = isClosest ? 1 : 0;
+        const rfPts = !isClosest ? 0 : (distance === 0 ? 2 : 1);
+        breakdown.randomFinisher = rfPts;
         totalPoints += breakdown.randomFinisher;
 
-        if (isClosest) {
+        if (rfPts === 2) {
+          console.log(`- ${userId}: R# EXACT MATCH ✓ +2 points`);
+        } else if (rfPts === 1) {
           console.log(`- ${userId}: R# CLOSEST (distance: ${distance}) ✓ +1 point`);
         } else {
           console.log(`- ${userId}: R# Not closest (distance: ${distance === Infinity ? 'N/A' : distance}) ✗ 0 points`);
@@ -2036,11 +2041,12 @@ function CalendarView({ group, user, currentRound }) {
           breakdown.sprintP2 = ex(roundData.sprintP2, raceResults.sprintP2); totalPoints += breakdown.sprintP2;
           breakdown.sprintP3 = ex(roundData.sprintP3, raceResults.sprintP3); totalPoints += breakdown.sprintP3;
         }
-        // Competitive R# bonus: +1 only to closest player(s)
+        // Competitive R# bonus: exact=+2, closest non-exact=+1, others=0
         const isClosest = distance === minDistance && distance !== Infinity;
-        breakdown.randomFinisher = isClosest ? 1 : 0;
+        const rfPts = !isClosest ? 0 : (distance === 0 ? 2 : 1);
+        breakdown.randomFinisher = rfPts;
         totalPoints += breakdown.randomFinisher;
-        console.log(`[recalculate] ${uid}: R# distance=${distance === Infinity ? 'N/A' : distance} → ${isClosest ? '+1 (closest)' : '0'}`);
+        console.log(`[recalculate] ${uid}: R# distance=${distance === Infinity ? 'N/A' : distance} → ${rfPts > 0 ? `+${rfPts}` : '0'}`);
         const scoresRef = doc(db, `groups/${group.id}/scores`, uid);
         await setDoc(scoresRef, { [roundKey]: { totalPoints, breakdown } }, { merge: true });
         saved++;
