@@ -695,8 +695,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
     if (pred.raceP2 && pred.raceP2 === allResults.raceP2) points += 1;
     if (pred.raceP3 && pred.raceP3 === allResults.raceP3) points += 1;
 
-    if (pred.finisherPosition === allResults.finisherAtPosition) points += 2;
-    else if (pred.finisherPosition && allResults.finisherAtPosition) points += 1;
+    if (pred.finisherPosition && allResults.finisherAtPosition && pred.finisherPosition === allResults.finisherAtPosition) points += 2;
 
     return points;
   };
@@ -1295,84 +1294,39 @@ function ResultsView({ group, user, currentRound }) {
         let totalPoints = 0;
         const breakdown = {};
 
+        // Helper: 1pt for exact driver name match (both must be non-empty)
+        const exact = (pred, result) => pred && result && pred === result ? 1 : 0;
+
         // Pole
-        if (roundData.pole === results.pole) {
-          breakdown.pole = 1;
-          totalPoints += 1;
-        } else {
-          breakdown.pole = 0;
-        }
+        breakdown.pole = exact(roundData.pole, results.pole);
+        totalPoints += breakdown.pole;
 
         // Sprint (if sprint weekend)
         if (race.isSprint) {
-          if (roundData.sprintQualPole === results.sprintQualPole) {
-            breakdown.sprintQualPole = 1;
-            totalPoints += 1;
-          } else {
-            breakdown.sprintQualPole = 0;
-          }
-          if (roundData.sprintP1 === results.sprintP1) {
-            breakdown.sprintP1 = 1;
-            totalPoints += 1;
-          } else {
-            breakdown.sprintP1 = 0;
-          }
-          if (roundData.sprintP2 === results.sprintP2) {
-            breakdown.sprintP2 = 1;
-            totalPoints += 1;
-          } else {
-            breakdown.sprintP2 = 0;
-          }
-          if (roundData.sprintP3 === results.sprintP3) {
-            breakdown.sprintP3 = 1;
-            totalPoints += 1;
-          } else {
-            breakdown.sprintP3 = 0;
-          }
+          breakdown.sprintQualPole = exact(roundData.sprintQualPole, results.sprintQualPole);
+          totalPoints += breakdown.sprintQualPole;
+          breakdown.sprintP1 = exact(roundData.sprintP1, results.sprintP1);
+          totalPoints += breakdown.sprintP1;
+          breakdown.sprintP2 = exact(roundData.sprintP2, results.sprintP2);
+          totalPoints += breakdown.sprintP2;
+          breakdown.sprintP3 = exact(roundData.sprintP3, results.sprintP3);
+          totalPoints += breakdown.sprintP3;
         }
 
         // Race Podium
-        if (roundData.raceP1 === results.raceP1) {
-          breakdown.raceP1 = 1;
-          totalPoints += 1;
-        } else {
-          breakdown.raceP1 = 0;
-        }
+        breakdown.raceP1 = exact(roundData.raceP1, results.raceP1);
+        totalPoints += breakdown.raceP1;
+        breakdown.raceP2 = exact(roundData.raceP2, results.raceP2);
+        totalPoints += breakdown.raceP2;
+        breakdown.raceP3 = exact(roundData.raceP3, results.raceP3);
+        totalPoints += breakdown.raceP3;
 
-        if (roundData.raceP2 === results.raceP2) {
-          breakdown.raceP2 = 1;
-          totalPoints += 1;
+        // Random Finisher — exact driver match = 2pts, anything else = 0pts
+        if (results.finisherAtPosition && roundData.finisherPosition && roundData.finisherPosition === results.finisherAtPosition) {
+          breakdown.randomFinisher = 2;
+          totalPoints += 2;
         } else {
-          breakdown.raceP2 = 0;
-        }
-
-        if (roundData.raceP3 === results.raceP3) {
-          breakdown.raceP3 = 1;
-          totalPoints += 1;
-        } else {
-          breakdown.raceP3 = 0;
-        }
-
-        // Random Finisher
-        if (results.finisherAtPosition && randomNumber) {
-          if (roundData.finisherPosition === results.finisherAtPosition) {
-            breakdown.randomFinisherExact = 2;
-            totalPoints += 2;
-          } else if (roundData.finisherPosition) {
-            // Closest guess (within 2 positions)
-            const diff = Math.abs(
-              parseInt(roundData.finisherPosition.split(' ')[0]) -
-              parseInt(results.finisherAtPosition.split(' ')[0])
-            );
-            breakdown.randomFinisherClosest = diff <= 2 ? 1 : 0;
-            totalPoints += breakdown.randomFinisherClosest;
-          } else {
-            breakdown.randomFinisherExact = 0;
-            breakdown.randomFinisherClosest = 0;
-          }
-        } else {
-          breakdown.randomFinisherExact = 0;
-          breakdown.randomFinisherClosest = 0;
+          breakdown.randomFinisher = 0;
         }
 
         // Save scores
