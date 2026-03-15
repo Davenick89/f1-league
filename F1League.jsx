@@ -102,6 +102,35 @@ function isEditLocked(race) {
   return new Date() >= lockTime;
 }
 
+// SCHEDULE SYNC — runs on app load, checks Jolpica API against hardcoded schedule
+async function syncScheduleWithAPI() {
+  console.log('[Schedule Sync] Starting...');
+  const TOLERANCE_MS = 60 * 60 * 1000; // 1-hour tolerance
+  try {
+    const res = await fetch('https://api.jolpi.ca/ergast/f1/2026.json');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const races = data?.MRData?.RaceTable?.Races;
+    if (!races?.length) { console.warn('[Schedule Sync] No races returned'); return; }
+
+    races.forEach(apiRace => {
+      const round = parseInt(apiRace.round);
+      const hardcoded = F1_SCHEDULE_2026.find(r => r.round === round);
+      if (!hardcoded || !apiRace.date || !apiRace.time) return;
+      const apiTime = new Date(`${apiRace.date}T${apiRace.time}`);
+      const hardcodedTime = new Date(hardcoded.raceStart);
+      const diffMs = Math.abs(apiTime - hardcodedTime);
+      if (diffMs > TOLERANCE_MS) {
+        const diffH = Math.round(diffMs / (1000 * 60 * 60));
+        console.warn(`[Schedule Sync] R${round} ${hardcoded.name}: timing differs by ~${diffH}h (API: ${apiTime.toISOString()}, hardcoded: ${hardcodedTime.toISOString()})`);
+      }
+    });
+    console.log(`[Schedule Sync] Complete — checked ${races.length} races`);
+  } catch (err) {
+    console.error('[Schedule Sync] Error:', err.message);
+  }
+}
+
 export default function F1League() {
   const [user, setUser] = useState(null);
   const [groups, setGroups] = useState([]);
@@ -116,6 +145,9 @@ export default function F1League() {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [inviteLink, setInviteLink] = useState("");
   const [copiedLink, setCopiedLink] = useState(false);
+
+  // Run schedule sync once on mount
+  useEffect(() => { syncScheduleWithAPI(); }, []);
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (authUser) => {
@@ -1143,7 +1175,6 @@ function ResultsView({ group, user, currentRound }) {
     raceP1: "",
     raceP2: "",
     raceP3: "",
-    fastestLap: "",
     finisherAtPosition: ""
   });
   const [randomNumber, setRandomNumber] = useState(null);
@@ -1163,7 +1194,7 @@ function ResultsView({ group, user, currentRound }) {
     if (!group) return;
 
     // Clear stale data from previous round
-    setResults({ pole: "", sprintQualPole: "", sprintP1: "", sprintP2: "", sprintP3: "", raceP1: "", raceP2: "", raceP3: "", fastestLap: "", finisherAtPosition: "" });
+    setResults({ pole: "", sprintQualPole: "", sprintP1: "", sprintP2: "", sprintP3: "", raceP1: "", raceP2: "", raceP3: "", finisherAtPosition: "" });
     setExistingResults(null);
     setRandomNumber(null);
 
@@ -1221,7 +1252,6 @@ function ResultsView({ group, user, currentRound }) {
         raceP1: results.raceP1,
         raceP2: results.raceP2,
         raceP3: results.raceP3,
-        fastestLap: results.fastestLap || null,
         finisherAtPosition: results.finisherAtPosition || null,
         randomNumber: randomNumber,
         recordedBy: user.uid,
@@ -1232,8 +1262,13 @@ function ResultsView({ group, user, currentRound }) {
       // NOW CALCULATE POINTS FOR ALL PREDICTIONS
       await calculateAndSaveScores();
 
-      setMessage(`✅ Round ${selectedRound} results saved! Points calculated for all players.`);
-      setTimeout(() => setMessage(""), 4000);
+      // Race progression notification
+      const nextRace = F1_SCHEDULE_2026[selectedRound]; // array is 0-indexed, so [selectedRound] = round+1
+      const nextMsg = nextRace
+        ? ` ${nextRace.name} (R${nextRace.round}) is now open for predictions!`
+        : " Season complete!";
+      setMessage(`✅ ${race.name} (R${selectedRound}) closed — points saved.${nextMsg}`);
+      setTimeout(() => setMessage(""), 6000);
     } catch (error) {
       console.error("Error:", error);
       setMessage("❌ Error saving results");
@@ -1316,14 +1351,6 @@ function ResultsView({ group, user, currentRound }) {
           totalPoints += 1;
         } else {
           breakdown.raceP3 = 0;
-        }
-
-        // Fastest Lap
-        if (results.fastestLap && roundData.fastestLap === results.fastestLap) {
-          breakdown.fastestLap = 1;
-          totalPoints += 1;
-        } else {
-          breakdown.fastestLap = 0;
         }
 
         // Random Finisher
@@ -1618,12 +1645,12 @@ function ResultsView({ group, user, currentRound }) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {randomNumber && (
                 <div>
-                  <label className="block text-sm font-bold mb-2">Fastest Lap (Optional)</label>
+                  <label className="block text-sm font-bold mb-2">🎲 Driver at P{randomNumber}</label>
                   <select
-                    value={results.fastestLap}
-                    onChange={(e) => setResults({ ...results, fastestLap: e.target.value })}
+                    value={results.finisherAtPosition}
+                    onChange={(e) => setResults({ ...results, finisherAtPosition: e.target.value })}
                     disabled={isLocked}
                     className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                   >
@@ -1631,22 +1658,7 @@ function ResultsView({ group, user, currentRound }) {
                     {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
                 </div>
-
-                {randomNumber && (
-                  <div>
-                    <label className="block text-sm font-bold mb-2">🎲 Driver at P{randomNumber}</label>
-                    <select
-                      value={results.finisherAtPosition}
-                      onChange={(e) => setResults({ ...results, finisherAtPosition: e.target.value })}
-                      disabled={isLocked}
-                      className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <option value="">Select Driver</option>
-                      {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
-                    </select>
-                  </div>
-                )}
-              </div>
+              )}
             </div>
 
             <button
