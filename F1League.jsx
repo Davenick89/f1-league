@@ -1786,19 +1786,21 @@ function CalendarView({ group, user, currentRound }) {
         if (!roundData) continue;
         let totalPoints = 0;
         const breakdown = {};
-        if (roundData.pole === raceResults.pole) { breakdown.pole = 1; totalPoints += 1; } else { breakdown.pole = 0; }
-        if (roundData.raceP1 === raceResults.raceP1) { breakdown.raceP1 = 1; totalPoints += 1; } else { breakdown.raceP1 = 0; }
-        if (roundData.raceP2 === raceResults.raceP2) { breakdown.raceP2 = 1; totalPoints += 1; } else { breakdown.raceP2 = 0; }
-        if (roundData.raceP3 === raceResults.raceP3) { breakdown.raceP3 = 1; totalPoints += 1; } else { breakdown.raceP3 = 0; }
+        const ex = (p, r) => p && r && p === r ? 1 : 0;
+        breakdown.pole = ex(roundData.pole, raceResults.pole); totalPoints += breakdown.pole;
+        breakdown.raceP1 = ex(roundData.raceP1, raceResults.raceP1); totalPoints += breakdown.raceP1;
+        breakdown.raceP2 = ex(roundData.raceP2, raceResults.raceP2); totalPoints += breakdown.raceP2;
+        breakdown.raceP3 = ex(roundData.raceP3, raceResults.raceP3); totalPoints += breakdown.raceP3;
         if (race.isSprint) {
-          if (roundData.sprintQualPole === raceResults.sprintQualPole) { breakdown.sprintQualPole = 1; totalPoints += 1; } else { breakdown.sprintQualPole = 0; }
-          if (roundData.sprintP1 === raceResults.sprintP1) { breakdown.sprintP1 = 1; totalPoints += 1; } else { breakdown.sprintP1 = 0; }
-          if (roundData.sprintP2 === raceResults.sprintP2) { breakdown.sprintP2 = 1; totalPoints += 1; } else { breakdown.sprintP2 = 0; }
-          if (roundData.sprintP3 === raceResults.sprintP3) { breakdown.sprintP3 = 1; totalPoints += 1; } else { breakdown.sprintP3 = 0; }
+          breakdown.sprintQualPole = ex(roundData.sprintQualPole, raceResults.sprintQualPole); totalPoints += breakdown.sprintQualPole;
+          breakdown.sprintP1 = ex(roundData.sprintP1, raceResults.sprintP1); totalPoints += breakdown.sprintP1;
+          breakdown.sprintP2 = ex(roundData.sprintP2, raceResults.sprintP2); totalPoints += breakdown.sprintP2;
+          breakdown.sprintP3 = ex(roundData.sprintP3, raceResults.sprintP3); totalPoints += breakdown.sprintP3;
         }
-        if (raceResults.finisherAtPosition && randomNumber) {
-          if (roundData.finisherPosition === raceResults.finisherAtPosition) { breakdown.randomFinisherExact = 2; totalPoints += 2; }
-          else { breakdown.randomFinisherExact = 0; }
+        if (raceResults.finisherAtPosition && roundData.finisherPosition && roundData.finisherPosition === raceResults.finisherAtPosition) {
+          breakdown.randomFinisher = 2; totalPoints += 2;
+        } else {
+          breakdown.randomFinisher = 0;
         }
         const scoresRef = doc(db, `groups/${group.id}/scores`, uid);
         await setDoc(scoresRef, { [roundKey]: { totalPoints, breakdown } }, { merge: true });
