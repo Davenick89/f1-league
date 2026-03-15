@@ -705,7 +705,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
     return new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
   };
 
-  // Calculate points for a prediction
+  // Calculate points for a prediction (competitive R# bonus)
   const calculatePredictionPoints = (pred) => {
     if (!allResults) return 0;
     let points = 0;
@@ -720,7 +720,18 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
     if (pred.raceP2 && pred.raceP2 === allResults.raceP2) points += 1;
     if (pred.raceP3 && pred.raceP3 === allResults.raceP3) points += 1;
 
-    points += getClosestFinisher(pred.finisherPosition, allResults.finisherAtPosition);
+    // Competitive R# bonus: +1 only to player(s) with closest prediction
+    const actualIdx = allResults.finisherAtPosition ? F1_GRID_ORDER.indexOf(allResults.finisherAtPosition) : -1;
+    const getDistance = (p) => {
+      const idx = p.finisherPosition ? F1_GRID_ORDER.indexOf(p.finisherPosition) : -1;
+      return (p.finisherPosition && allResults.finisherAtPosition && idx !== -1 && actualIdx !== -1)
+        ? Math.abs(idx - actualIdx)
+        : Infinity;
+    };
+    const distances = allPredictions.map(getDistance).filter(d => d !== Infinity);
+    const minDistance = distances.length > 0 ? Math.min(...distances) : Infinity;
+    const myDistance = getDistance(pred);
+    if (myDistance === minDistance && myDistance !== Infinity) points += 1;
 
     return points;
   };
@@ -892,54 +903,126 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
         {message && <p className="text-center text-sm mt-3 text-green-400">{message}</p>}
       </div>
 
-      {/* ALL PREDICTIONS TABLE WITH POINTS */}
+      {/* ALL PREDICTIONS TABLE — dynamic: names-only before results, name/pts after */}
       <div className="bg-gray-900 border border-red-600/50 rounded-lg p-4 overflow-x-auto">
         <h3 className="text-lg font-bold mb-4">ALL PREDICTIONS & POINTS</h3>
         {allPredictions.length === 0 ? (
           <p className="text-gray-400 text-center py-6">Waiting for predictions... once players submit, they'll appear here</p>
-        ) : (
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b-2 border-red-600">
-                <th className="text-left p-2 font-bold">Player</th>
-                <th className="text-center p-1 font-bold">Pole</th>
-                {race.isSprint && <th className="text-center p-1 font-bold text-yellow-400">SQ</th>}
-                {race.isSprint && <th className="text-center p-1 font-bold text-orange-400">SP1</th>}
-                {race.isSprint && <th className="text-center p-1 font-bold text-orange-400">SP2</th>}
-                {race.isSprint && <th className="text-center p-1 font-bold text-orange-400">SP3</th>}
-                <th className="text-center p-1 font-bold">P1</th>
-                <th className="text-center p-1 font-bold">P2</th>
-                <th className="text-center p-1 font-bold">P3</th>
-                <th className="text-center p-1 font-bold">R#</th>
-                <th className="text-center p-1 font-bold text-gray-400">Edited</th>
-                <th className="text-center p-1 font-bold bg-green-900">PTS</th>
-                <th className="text-center p-1 font-bold bg-yellow-900">TOT</th>
-              </tr>
-            </thead>
-            <tbody>
-              {allPredictions.map((p) => {
-                const pts = calculatePredictionPoints(p);
-                return (
-                  <tr key={p.userId} className="border-b border-gray-700 hover:bg-gray-800">
-                    <td className="p-2 font-bold text-white">{p.nickname}</td>
-                    <td className="p-1 text-center text-yellow-300">{p.pole ? p.pole.split(' ')[0] : "-"}</td>
-                    {race.isSprint && <td className="p-1 text-center text-yellow-300">{p.sprintQualPole ? p.sprintQualPole.split(' ')[0] : "-"}</td>}
-                    {race.isSprint && <td className="p-1 text-center text-orange-300">{p.sprintP1 ? p.sprintP1.split(' ')[0] : "-"}</td>}
-                    {race.isSprint && <td className="p-1 text-center text-orange-300">{p.sprintP2 ? p.sprintP2.split(' ')[0] : "-"}</td>}
-                    {race.isSprint && <td className="p-1 text-center text-orange-300">{p.sprintP3 ? p.sprintP3.split(' ')[0] : "-"}</td>}
-                    <td className="p-1 text-center text-blue-300">{p.raceP1 ? p.raceP1.split(' ')[0] : "-"}</td>
-                    <td className="p-1 text-center text-blue-300">{p.raceP2 ? p.raceP2.split(' ')[0] : "-"}</td>
-                    <td className="p-1 text-center text-blue-300">{p.raceP3 ? p.raceP3.split(' ')[0] : "-"}</td>
-                    <td className="p-1 text-center text-green-300">{p.finisherPosition ? p.finisherPosition.split(' ')[0] : "-"}</td>
-                    <td className="p-1 text-center whitespace-nowrap" style={{ color: '#999', fontSize: '0.7rem' }}>{formatTime(p.lastEditTime)}</td>
-                    <td className="p-1 text-center font-bold bg-green-900 text-white">{pts}</td>
-                    <td className="p-1 text-center font-bold bg-yellow-900 text-white">{pts}</td>
+        ) : (() => {
+          const hasResults = !!(allResults && allResults.pole && allResults.raceP1);
+
+          // Compute competitive R# distance for each prediction
+          const actualIdx = allResults?.finisherAtPosition ? F1_GRID_ORDER.indexOf(allResults.finisherAtPosition) : -1;
+          const getDist = (p) => {
+            const idx = p.finisherPosition ? F1_GRID_ORDER.indexOf(p.finisherPosition) : -1;
+            return (p.finisherPosition && allResults?.finisherAtPosition && idx !== -1 && actualIdx !== -1)
+              ? Math.abs(idx - actualIdx) : Infinity;
+          };
+          const allDists = allPredictions.map(getDist).filter(d => d !== Infinity);
+          const minDist = allDists.length > 0 ? Math.min(...allDists) : Infinity;
+
+          const getBreakdown = (p) => {
+            if (!allResults) return {};
+            const ex = (a, b) => (a && b && a === b) ? 1 : 0;
+            const d = getDist(p);
+            return {
+              pole: ex(p.pole, allResults.pole),
+              sprintQualPole: ex(p.sprintQualPole, allResults.sprintQualPole),
+              sprintP1: ex(p.sprintP1, allResults.sprintP1),
+              sprintP2: ex(p.sprintP2, allResults.sprintP2),
+              sprintP3: ex(p.sprintP3, allResults.sprintP3),
+              raceP1: ex(p.raceP1, allResults.raceP1),
+              raceP2: ex(p.raceP2, allResults.raceP2),
+              raceP3: ex(p.raceP3, allResults.raceP3),
+              randomFinisher: (d === minDist && d !== Infinity) ? 1 : 0,
+            };
+          };
+
+          const fn = (name) => name ? name.split(' ')[0] : '-';
+          const PointCell = ({ name, pts }) => (
+            <td className={`p-1 text-center font-semibold text-xs ${pts === 1 ? 'bg-green-900/60 text-green-400' : 'bg-red-900/40 text-red-400'}`}>
+              {fn(name)}/{pts ?? 0}
+            </td>
+          );
+
+          if (!hasResults) {
+            return (
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b-2 border-red-600">
+                    <th className="text-left p-2 font-bold">Player</th>
+                    <th className="text-center p-1 font-bold">Pole</th>
+                    {race.isSprint && <th className="text-center p-1 font-bold text-yellow-400">SQ</th>}
+                    {race.isSprint && <th className="text-center p-1 font-bold text-orange-400">SP1</th>}
+                    {race.isSprint && <th className="text-center p-1 font-bold text-orange-400">SP2</th>}
+                    {race.isSprint && <th className="text-center p-1 font-bold text-orange-400">SP3</th>}
+                    <th className="text-center p-1 font-bold">P1</th>
+                    <th className="text-center p-1 font-bold">P2</th>
+                    <th className="text-center p-1 font-bold">P3</th>
+                    <th className="text-center p-1 font-bold">R#</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
+                </thead>
+                <tbody>
+                  {allPredictions.map((p) => (
+                    <tr key={p.userId} className="border-b border-gray-700 hover:bg-gray-800">
+                      <td className="p-2 font-bold text-white">{p.nickname}</td>
+                      <td className="p-1 text-center text-gray-300">{fn(p.pole)}</td>
+                      {race.isSprint && <td className="p-1 text-center text-gray-300">{fn(p.sprintQualPole)}</td>}
+                      {race.isSprint && <td className="p-1 text-center text-gray-300">{fn(p.sprintP1)}</td>}
+                      {race.isSprint && <td className="p-1 text-center text-gray-300">{fn(p.sprintP2)}</td>}
+                      {race.isSprint && <td className="p-1 text-center text-gray-300">{fn(p.sprintP3)}</td>}
+                      <td className="p-1 text-center text-gray-300">{fn(p.raceP1)}</td>
+                      <td className="p-1 text-center text-gray-300">{fn(p.raceP2)}</td>
+                      <td className="p-1 text-center text-gray-300">{fn(p.raceP3)}</td>
+                      <td className="p-1 text-center text-gray-300">{fn(p.finisherPosition)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            );
+          }
+
+          return (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b-2 border-red-600">
+                  <th className="text-left p-2 font-bold">Player</th>
+                  <th className="text-center p-1 font-bold">Pole</th>
+                  {race.isSprint && <th className="text-center p-1 font-bold text-yellow-400">SQ</th>}
+                  {race.isSprint && <th className="text-center p-1 font-bold text-orange-400">SP1</th>}
+                  {race.isSprint && <th className="text-center p-1 font-bold text-orange-400">SP2</th>}
+                  {race.isSprint && <th className="text-center p-1 font-bold text-orange-400">SP3</th>}
+                  <th className="text-center p-1 font-bold">P1</th>
+                  <th className="text-center p-1 font-bold">P2</th>
+                  <th className="text-center p-1 font-bold">P3</th>
+                  <th className="text-center p-1 font-bold">R#</th>
+                  <th className="text-center p-1 font-bold bg-yellow-900 text-yellow-300">TOTAL</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allPredictions.map((p) => {
+                  const bd = getBreakdown(p);
+                  const total = Object.values(bd).reduce((sum, v) => sum + (v || 0), 0);
+                  return (
+                    <tr key={p.userId} className="border-b border-gray-700 hover:bg-gray-800">
+                      <td className="p-2 font-bold text-white">{p.nickname}</td>
+                      <PointCell name={p.pole} pts={bd.pole} />
+                      {race.isSprint && <PointCell name={p.sprintQualPole} pts={bd.sprintQualPole} />}
+                      {race.isSprint && <PointCell name={p.sprintP1} pts={bd.sprintP1} />}
+                      {race.isSprint && <PointCell name={p.sprintP2} pts={bd.sprintP2} />}
+                      {race.isSprint && <PointCell name={p.sprintP3} pts={bd.sprintP3} />}
+                      <PointCell name={p.raceP1} pts={bd.raceP1} />
+                      <PointCell name={p.raceP2} pts={bd.raceP2} />
+                      <PointCell name={p.raceP3} pts={bd.raceP3} />
+                      <PointCell name={p.finisherPosition} pts={bd.randomFinisher} />
+                      <td className="p-1 text-center font-bold bg-yellow-900 text-yellow-300 text-sm">{total}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          );
+        })()}
       </div>
     </div>
   );
@@ -1311,25 +1394,46 @@ function ResultsView({ group, user, currentRound }) {
         collection(db, `groups/${group.id}/predictions`)
       );
 
-      // For each user with predictions
+      const exact = (pred, result) => pred && result && pred === result ? 1 : 0;
+      const actualFinisher = results.finisherAtPosition;
+      const actualIdx = actualFinisher ? F1_GRID_ORDER.indexOf(actualFinisher) : -1;
+
+      // First pass: collect all player data and compute R# distances
+      const playerData = [];
       for (const predDoc of predictionsSnapshot.docs) {
         const userId = predDoc.id;
         const roundData = predDoc.data()[`round${selectedRound}`];
+        if (!roundData) continue;
+        const predicted = roundData.finisherPosition;
+        const predIdx = predicted ? F1_GRID_ORDER.indexOf(predicted) : -1;
+        const distance = (predicted && actualFinisher && predIdx !== -1 && actualIdx !== -1)
+          ? Math.abs(predIdx - actualIdx)
+          : Infinity;
+        playerData.push({ userId, roundData, distance });
+      }
 
-        if (!roundData) continue; // Skip if no predictions for this round
+      // Determine closest distance for competitive R# bonus
+      const validDistances = playerData.filter(p => p.distance !== Infinity).map(p => p.distance);
+      const minDistance = validDistances.length > 0 ? Math.min(...validDistances) : Infinity;
 
-        // Calculate points for this user
+      console.log(`Found ${playerData.length} players with predictions`);
+      console.log(`Player R# Predictions:`);
+      playerData.forEach(p => {
+        console.log(`  ${p.userId}: predicted "${p.roundData.finisherPosition}" → DISTANCE_${p.distance === Infinity ? 'N/A' : p.distance}`);
+      });
+      console.log(`Closest distance: ${minDistance === Infinity ? 'N/A' : minDistance} positions`);
+      const closestPlayers = playerData.filter(p => p.distance === minDistance).map(p => p.userId);
+      console.log(`Closest player(s): ${closestPlayers.join(', ')}`);
+      console.log(`SCORING EACH PLAYER:`);
+
+      // Second pass: calculate and save scores
+      for (const { userId, roundData, distance } of playerData) {
         let totalPoints = 0;
         const breakdown = {};
 
-        // Helper: 1pt for exact driver name match (both must be non-empty)
-        const exact = (pred, result) => pred && result && pred === result ? 1 : 0;
-
-        // Pole
         breakdown.pole = exact(roundData.pole, results.pole);
         totalPoints += breakdown.pole;
 
-        // Sprint (if sprint weekend)
         if (race.isSprint) {
           breakdown.sprintQualPole = exact(roundData.sprintQualPole, results.sprintQualPole);
           totalPoints += breakdown.sprintQualPole;
@@ -1341,7 +1445,6 @@ function ResultsView({ group, user, currentRound }) {
           totalPoints += breakdown.sprintP3;
         }
 
-        // Race Podium
         breakdown.raceP1 = exact(roundData.raceP1, results.raceP1);
         totalPoints += breakdown.raceP1;
         breakdown.raceP2 = exact(roundData.raceP2, results.raceP2);
@@ -1349,11 +1452,17 @@ function ResultsView({ group, user, currentRound }) {
         breakdown.raceP3 = exact(roundData.raceP3, results.raceP3);
         totalPoints += breakdown.raceP3;
 
-        // Random Finisher — exact = 2pts, within 2 grid positions = 1pt, else 0pts
-        breakdown.randomFinisher = getClosestFinisher(roundData.finisherPosition, results.finisherAtPosition);
+        // Competitive R# bonus: +1 only to closest player(s)
+        const isClosest = distance === minDistance && distance !== Infinity;
+        breakdown.randomFinisher = isClosest ? 1 : 0;
         totalPoints += breakdown.randomFinisher;
 
-        // Save scores
+        if (isClosest) {
+          console.log(`- ${userId}: R# CLOSEST (distance: ${distance}) ✓ +1 point`);
+        } else {
+          console.log(`- ${userId}: R# Not closest (distance: ${distance === Infinity ? 'N/A' : distance}) ✗ 0 points`);
+        }
+
         const scoresRef = doc(db, `groups/${group.id}/scores`, userId);
         await setDoc(scoresRef, {
           [`round${selectedRound}`]: {
@@ -1890,12 +1999,33 @@ function CalendarView({ group, user, currentRound }) {
       const randomNumber = randSnap.exists() ? randSnap.data().number : null;
       const roundKey = `round${race.round}`;
       let saved = 0;
-      for (const [uid, predData] of Object.entries(allPredictions)) {
-        const roundData = predData[roundKey];
-        if (!roundData) continue;
+      const ex = (p, r) => p && r && p === r ? 1 : 0;
+      const actualFinisher = raceResults.finisherAtPosition;
+      const actualIdx = actualFinisher ? F1_GRID_ORDER.indexOf(actualFinisher) : -1;
+
+      // First pass: collect player data and compute R# distances
+      const playerEntries = Object.entries(allPredictions)
+        .map(([uid, predData]) => {
+          const roundData = predData[roundKey];
+          if (!roundData) return null;
+          const predicted = roundData.finisherPosition;
+          const predIdx = predicted ? F1_GRID_ORDER.indexOf(predicted) : -1;
+          const distance = (predicted && actualFinisher && predIdx !== -1 && actualIdx !== -1)
+            ? Math.abs(predIdx - actualIdx)
+            : Infinity;
+          return { uid, roundData, distance };
+        })
+        .filter(Boolean);
+
+      // Determine closest distance for competitive R# bonus
+      const validDistances = playerEntries.filter(p => p.distance !== Infinity).map(p => p.distance);
+      const minDistance = validDistances.length > 0 ? Math.min(...validDistances) : Infinity;
+      console.log(`[recalculate round${race.round}] Closest R# distance: ${minDistance === Infinity ? 'N/A' : minDistance}`);
+
+      // Second pass: calculate and save scores
+      for (const { uid, roundData, distance } of playerEntries) {
         let totalPoints = 0;
         const breakdown = {};
-        const ex = (p, r) => p && r && p === r ? 1 : 0;
         breakdown.pole = ex(roundData.pole, raceResults.pole); totalPoints += breakdown.pole;
         breakdown.raceP1 = ex(roundData.raceP1, raceResults.raceP1); totalPoints += breakdown.raceP1;
         breakdown.raceP2 = ex(roundData.raceP2, raceResults.raceP2); totalPoints += breakdown.raceP2;
@@ -1906,8 +2036,11 @@ function CalendarView({ group, user, currentRound }) {
           breakdown.sprintP2 = ex(roundData.sprintP2, raceResults.sprintP2); totalPoints += breakdown.sprintP2;
           breakdown.sprintP3 = ex(roundData.sprintP3, raceResults.sprintP3); totalPoints += breakdown.sprintP3;
         }
-        breakdown.randomFinisher = getClosestFinisher(roundData.finisherPosition, raceResults.finisherAtPosition);
+        // Competitive R# bonus: +1 only to closest player(s)
+        const isClosest = distance === minDistance && distance !== Infinity;
+        breakdown.randomFinisher = isClosest ? 1 : 0;
         totalPoints += breakdown.randomFinisher;
+        console.log(`[recalculate] ${uid}: R# distance=${distance === Infinity ? 'N/A' : distance} → ${isClosest ? '+1 (closest)' : '0'}`);
         const scoresRef = doc(db, `groups/${group.id}/scores`, uid);
         await setDoc(scoresRef, { [roundKey]: { totalPoints, breakdown } }, { merge: true });
         saved++;
