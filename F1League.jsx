@@ -59,6 +59,25 @@ const F1_TEAMS = [
   "Aston Martin", "Alpine", "Haas", "Racing Bulls", "Audi", "Cadillac"
 ];
 
+// Grid order for closest finisher scoring (approximate 2026 championship order)
+const F1_GRID_ORDER = [
+  "Max Verstappen", "Lando Norris", "Oscar Piastri", "Charles Leclerc",
+  "George Russell", "Lewis Hamilton", "Carlos Sainz", "Fernando Alonso",
+  "Kimi Antonelli", "Isack Hadjar", "Pierre Gasly", "Franco Colapinto",
+  "Alexander Albon", "Oliver Bearman", "Esteban Ocon", "Lance Stroll",
+  "Liam Lawson", "Nico Hulkenberg", "Arvid Lindblad", "Gabriel Bortoleto",
+  "Sergio Perez", "Valtteri Bottas"
+];
+
+function getClosestFinisher(predicted, actual) {
+  if (!predicted || !actual) return 0;
+  if (predicted === actual) return 2;
+  const predIdx = F1_GRID_ORDER.indexOf(predicted);
+  const actualIdx = F1_GRID_ORDER.indexOf(actual);
+  if (predIdx === -1 || actualIdx === -1) return 0;
+  return Math.abs(predIdx - actualIdx) <= 2 ? 1 : 0;
+}
+
 function getCurrentRound() {
   const now = new Date();
   const seasonStart = new Date("2026-03-06T00:00:00Z");
@@ -701,7 +720,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
     if (pred.raceP2 && pred.raceP2 === allResults.raceP2) points += 1;
     if (pred.raceP3 && pred.raceP3 === allResults.raceP3) points += 1;
 
-    if (pred.finisherPosition && allResults.finisherAtPosition && pred.finisherPosition === allResults.finisherAtPosition) points += 2;
+    points += getClosestFinisher(pred.finisherPosition, allResults.finisherAtPosition);
 
     return points;
   };
@@ -1330,13 +1349,9 @@ function ResultsView({ group, user, currentRound }) {
         breakdown.raceP3 = exact(roundData.raceP3, results.raceP3);
         totalPoints += breakdown.raceP3;
 
-        // Random Finisher — exact driver match = 2pts, anything else = 0pts
-        if (results.finisherAtPosition && roundData.finisherPosition && roundData.finisherPosition === results.finisherAtPosition) {
-          breakdown.randomFinisher = 2;
-          totalPoints += 2;
-        } else {
-          breakdown.randomFinisher = 0;
-        }
+        // Random Finisher — exact = 2pts, within 2 grid positions = 1pt, else 0pts
+        breakdown.randomFinisher = getClosestFinisher(roundData.finisherPosition, results.finisherAtPosition);
+        totalPoints += breakdown.randomFinisher;
 
         // Save scores
         const scoresRef = doc(db, `groups/${group.id}/scores`, userId);
@@ -1891,11 +1906,8 @@ function CalendarView({ group, user, currentRound }) {
           breakdown.sprintP2 = ex(roundData.sprintP2, raceResults.sprintP2); totalPoints += breakdown.sprintP2;
           breakdown.sprintP3 = ex(roundData.sprintP3, raceResults.sprintP3); totalPoints += breakdown.sprintP3;
         }
-        if (raceResults.finisherAtPosition && roundData.finisherPosition && roundData.finisherPosition === raceResults.finisherAtPosition) {
-          breakdown.randomFinisher = 2; totalPoints += 2;
-        } else {
-          breakdown.randomFinisher = 0;
-        }
+        breakdown.randomFinisher = getClosestFinisher(roundData.finisherPosition, raceResults.finisherAtPosition);
+        totalPoints += breakdown.randomFinisher;
         const scoresRef = doc(db, `groups/${group.id}/scores`, uid);
         await setDoc(scoresRef, { [roundKey]: { totalPoints, breakdown } }, { merge: true });
         saved++;
