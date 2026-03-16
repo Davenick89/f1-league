@@ -61,12 +61,26 @@ const F1_TEAMS = [
 
 // Grid order for closest finisher scoring (approximate 2026 championship order)
 const F1_GRID_ORDER = [
-  "Max Verstappen", "Lando Norris", "Oscar Piastri", "Charles Leclerc",
-  "George Russell", "Lewis Hamilton", "Carlos Sainz", "Fernando Alonso",
-  "Kimi Antonelli", "Isack Hadjar", "Pierre Gasly", "Franco Colapinto",
-  "Alexander Albon", "Oliver Bearman", "Esteban Ocon", "Lance Stroll",
-  "Liam Lawson", "Nico Hulkenberg", "Arvid Lindblad", "Gabriel Bortoleto",
-  "Sergio Perez", "Valtteri Bottas"
+  "Lando Norris",      // 0
+  "Oscar Piastri",     // 1
+  "George Russell",    // 2
+  "Kimi Antonelli",    // 3
+  "Charles Leclerc",   // 4
+  "Lewis Hamilton",    // 5
+  "Max Verstappen",    // 6
+  "Isack Hadjar",      // 7
+  "Carlos Sainz",      // 8
+  "Alexander Albon",   // 9
+  "Fernando Alonso",   // 10
+  "Lance Stroll",      // 11
+  "Pierre Gasly",      // 12
+  "Franco Colapinto",  // 13
+  "Oliver Bearman",    // 14
+  "Esteban Ocon",      // 15
+  "Liam Lawson",       // 16
+  "Arvid Lindblad",    // 17
+  "Nico Hulkenberg",   // 18
+  "Gabriel Bortoleto", // 19
 ];
 
 function getClosestFinisher(predicted, actual) {
