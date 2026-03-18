@@ -735,16 +735,22 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
     if (pred.raceP3 && pred.raceP3 === allResults.raceP3) points += 1;
 
     // Competitive R# bonus: +1 only to player(s) with closest prediction
-    const actualIdx = allResults.finisherAtPosition ? F1_GRID_ORDER.indexOf(allResults.finisherAtPosition) : -1;
-    const getDistance = (p) => {
+    const getRfDistanceForPlayer = (p) => {
+      const posStr = allResults.rPredFinishPositions?.[p.userId];
+      if (posStr) {
+        if (posStr === "DNS" || posStr === "DNF") return Infinity;
+        const pos = parseInt(posStr.replace("P", ""), 10);
+        return isNaN(pos) || !randomNumber ? Infinity : Math.abs(pos - randomNumber);
+      }
+      // Fallback: F1_GRID_ORDER distance vs finisherAtPosition
+      const actualIdx = allResults.finisherAtPosition ? F1_GRID_ORDER.indexOf(allResults.finisherAtPosition) : -1;
       const idx = p.finisherPosition ? F1_GRID_ORDER.indexOf(p.finisherPosition) : -1;
       return (p.finisherPosition && allResults.finisherAtPosition && idx !== -1 && actualIdx !== -1)
-        ? Math.abs(idx - actualIdx)
-        : Infinity;
+        ? Math.abs(idx - actualIdx) : Infinity;
     };
-    const distances = allPredictions.map(getDistance).filter(d => d !== Infinity);
+    const distances = allPredictions.map(getRfDistanceForPlayer).filter(d => d !== Infinity);
     const minDistance = distances.length > 0 ? Math.min(...distances) : Infinity;
-    const myDistance = getDistance(pred);
+    const myDistance = getRfDistanceForPlayer(pred);
     if (myDistance === minDistance && myDistance !== Infinity) {
       points += myDistance === 0 ? 2 : 1;
     }
@@ -928,8 +934,15 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
           const hasResults = !!(allResults && allResults.pole && allResults.raceP1);
 
           // Compute competitive R# distance for each prediction
-          const actualIdx = allResults?.finisherAtPosition ? F1_GRID_ORDER.indexOf(allResults.finisherAtPosition) : -1;
           const getDist = (p) => {
+            const posStr = allResults?.rPredFinishPositions?.[p.userId];
+            if (posStr) {
+              if (posStr === "DNS" || posStr === "DNF") return Infinity;
+              const pos = parseInt(posStr.replace("P", ""), 10);
+              return isNaN(pos) || !randomNumber ? Infinity : Math.abs(pos - randomNumber);
+            }
+            // Fallback: F1_GRID_ORDER distance vs finisherAtPosition
+            const actualIdx = allResults?.finisherAtPosition ? F1_GRID_ORDER.indexOf(allResults.finisherAtPosition) : -1;
             const idx = p.finisherPosition ? F1_GRID_ORDER.indexOf(p.finisherPosition) : -1;
             return (p.finisherPosition && allResults?.finisherAtPosition && idx !== -1 && actualIdx !== -1)
               ? Math.abs(idx - actualIdx) : Infinity;
@@ -1300,12 +1313,14 @@ function ResultsView({ group, user, currentRound }) {
     raceP1: "",
     raceP2: "",
     raceP3: "",
-    finisherAtPosition: ""
+    finisherAtPosition: "",
+    rPredFinishPositions: {}
   });
   const [randomNumber, setRandomNumber] = useState(null);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [existingResults, setExistingResults] = useState(null);
+  const [roundPredictions, setRoundPredictions] = useState([]); // [{uid, nickname, driver}]
   const [nowTs, setNowTs] = useState(() => Date.now());
   const [showEndConfirm, setShowEndConfirm] = useState(false);
 
@@ -1320,9 +1335,10 @@ function ResultsView({ group, user, currentRound }) {
     if (!group) return;
 
     // Clear stale data from previous round
-    setResults({ pole: "", sprintQualPole: "", sprintP1: "", sprintP2: "", sprintP3: "", raceP1: "", raceP2: "", raceP3: "", finisherAtPosition: "" });
+    setResults({ pole: "", sprintQualPole: "", sprintP1: "", sprintP2: "", sprintP3: "", raceP1: "", raceP2: "", raceP3: "", finisherAtPosition: "", rPredFinishPositions: {} });
     setExistingResults(null);
     setRandomNumber(null);
+    setRoundPredictions([]);
 
     const unsubscribe = onSnapshot(
       doc(db, `groups/${group.id}/results`, `round${selectedRound}`),
@@ -1354,6 +1370,27 @@ function ResultsView({ group, user, currentRound }) {
     return () => unsubscribe();
   }, [group, selectedRound]);
 
+  // Load all players' R# predictions for selected round (to show finishing-position inputs)
+  useEffect(() => {
+    if (!group) return;
+    getDocs(collection(db, `groups/${group.id}/predictions`)).then((snap) => {
+      const roundKey = `round${selectedRound}`;
+      const preds = snap.docs
+        .map((d) => {
+          const roundData = d.data()[roundKey];
+          if (!roundData?.finisherPosition) return null;
+          return {
+            uid: d.id,
+            nickname: d.data().nickname || d.id,
+            driver: roundData.finisherPosition,
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.nickname.localeCompare(b.nickname));
+      setRoundPredictions(preds);
+    });
+  }, [group, selectedRound]);
+
   const handleSaveResults = async () => {
     // Hard lock guard — re-check at save time
     if (lockTimeMs !== null && Date.now() > lockTimeMs) {
@@ -1380,6 +1417,7 @@ function ResultsView({ group, user, currentRound }) {
         raceP3: results.raceP3,
         finisherAtPosition: results.finisherAtPosition || null,
         randomNumber: randomNumber,
+        rPredFinishPositions: results.rPredFinishPositions || {},
         recordedBy: user.uid,
         recordedAt: new Date().toISOString(),
         createdAt: serverTimestamp()
@@ -1411,8 +1449,23 @@ function ResultsView({ group, user, currentRound }) {
       );
 
       const exact = (pred, result) => pred && result && pred === result ? 1 : 0;
-      const actualFinisher = results.finisherAtPosition;
-      const actualIdx = actualFinisher ? F1_GRID_ORDER.indexOf(actualFinisher) : -1;
+
+      // Helper: get R# distance for a player using rPredFinishPositions (new method)
+      // Falls back to F1_GRID_ORDER distance if rPredFinishPositions not set (old races)
+      const getRfDistance = (userId, predicted) => {
+        const posStr = results.rPredFinishPositions?.[userId];
+        if (posStr) {
+          if (posStr === "DNS" || posStr === "DNF") return Infinity;
+          const pos = parseInt(posStr.replace("P", ""), 10);
+          return isNaN(pos) ? Infinity : Math.abs(pos - randomNumber);
+        }
+        // Fallback: F1_GRID_ORDER distance vs finisherAtPosition
+        const actualFinisher = results.finisherAtPosition;
+        const actualIdx = actualFinisher ? F1_GRID_ORDER.indexOf(actualFinisher) : -1;
+        const predIdx = predicted ? F1_GRID_ORDER.indexOf(predicted) : -1;
+        return (predicted && actualFinisher && predIdx !== -1 && actualIdx !== -1)
+          ? Math.abs(predIdx - actualIdx) : Infinity;
+      };
 
       // First pass: collect all player data and compute R# distances
       const playerData = [];
@@ -1421,10 +1474,7 @@ function ResultsView({ group, user, currentRound }) {
         const roundData = predDoc.data()[`round${selectedRound}`];
         if (!roundData) continue;
         const predicted = roundData.finisherPosition;
-        const predIdx = predicted ? F1_GRID_ORDER.indexOf(predicted) : -1;
-        const distance = (predicted && actualFinisher && predIdx !== -1 && actualIdx !== -1)
-          ? Math.abs(predIdx - actualIdx)
-          : Infinity;
+        const distance = getRfDistance(userId, predicted);
         playerData.push({ userId, roundData, distance });
       }
 
@@ -1433,9 +1483,9 @@ function ResultsView({ group, user, currentRound }) {
       const minDistance = validDistances.length > 0 ? Math.min(...validDistances) : Infinity;
 
       console.log(`Found ${playerData.length} players with predictions`);
-      console.log(`Player R# Predictions:`);
+      console.log(`R# Finishing Positions: ${JSON.stringify(results.rPredFinishPositions)}`);
       playerData.forEach(p => {
-        console.log(`  ${p.userId}: predicted "${p.roundData.finisherPosition}" → DISTANCE_${p.distance === Infinity ? 'N/A' : p.distance}`);
+        console.log(`  ${p.userId}: predicted "${p.roundData.finisherPosition}" → distance ${p.distance === Infinity ? 'N/A' : p.distance}`);
       });
       console.log(`Closest distance: ${minDistance === Infinity ? 'N/A' : minDistance} positions`);
       const closestPlayers = playerData.filter(p => p.distance === minDistance).map(p => p.userId);
@@ -1807,6 +1857,38 @@ function ResultsView({ group, user, currentRound }) {
                   </select>
                 </div>
               )}
+
+              {randomNumber && roundPredictions.length > 0 && (
+                <div className="border border-purple-600/50 rounded-lg p-4 bg-purple-900/10">
+                  <p className="text-xs font-bold text-purple-400 mb-1 tracking-wide">🎲 R# PREDICTIONS — ACTUAL FINISHING POSITIONS</p>
+                  <p className="text-xs text-gray-400 mb-3">Where did each player's predicted driver actually finish? Select finishing position (or DNS/DNF). Scoring: exact P{randomNumber} = +2, closest = +1.</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {roundPredictions.map(({ uid, nickname, driver }) => (
+                      <div key={uid}>
+                        <label className="block text-xs font-semibold text-gray-300 mb-1">
+                          {nickname} → <span className="text-purple-300">{driver}</span>
+                        </label>
+                        <select
+                          value={results.rPredFinishPositions?.[uid] || ""}
+                          onChange={(e) => setResults(prev => ({
+                            ...prev,
+                            rPredFinishPositions: { ...prev.rPredFinishPositions, [uid]: e.target.value }
+                          }))}
+                          disabled={isLocked}
+                          className="w-full bg-gray-800 border border-purple-600/40 rounded p-2 text-white text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <option value="">— not entered —</option>
+                          {Array.from({ length: 22 }, (_, i) => `P${i + 1}`).map(p => (
+                            <option key={p} value={p}>{p}</option>
+                          ))}
+                          <option value="DNS">DNS</option>
+                          <option value="DNF">DNF</option>
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-3">
@@ -2019,8 +2101,22 @@ function CalendarView({ group, user, currentRound }) {
       const roundKey = `round${race.round}`;
       let saved = 0;
       const ex = (p, r) => p && r && p === r ? 1 : 0;
-      const actualFinisher = raceResults.finisherAtPosition;
-      const actualIdx = actualFinisher ? F1_GRID_ORDER.indexOf(actualFinisher) : -1;
+
+      // Helper: R# distance using rPredFinishPositions (new), fallback to F1_GRID_ORDER (old races)
+      const getRfDist = (uid, predicted) => {
+        const posStr = raceResults.rPredFinishPositions?.[uid];
+        if (posStr) {
+          if (posStr === "DNS" || posStr === "DNF") return Infinity;
+          const pos = parseInt(posStr.replace("P", ""), 10);
+          return isNaN(pos) ? Infinity : Math.abs(pos - randomNumber);
+        }
+        // Fallback: F1_GRID_ORDER distance vs finisherAtPosition
+        const actualFinisher = raceResults.finisherAtPosition;
+        const actualIdx = actualFinisher ? F1_GRID_ORDER.indexOf(actualFinisher) : -1;
+        const predIdx = predicted ? F1_GRID_ORDER.indexOf(predicted) : -1;
+        return (predicted && actualFinisher && predIdx !== -1 && actualIdx !== -1)
+          ? Math.abs(predIdx - actualIdx) : Infinity;
+      };
 
       // First pass: collect player data and compute R# distances
       const playerEntries = Object.entries(allPredictions)
@@ -2028,10 +2124,7 @@ function CalendarView({ group, user, currentRound }) {
           const roundData = predData[roundKey];
           if (!roundData) return null;
           const predicted = roundData.finisherPosition;
-          const predIdx = predicted ? F1_GRID_ORDER.indexOf(predicted) : -1;
-          const distance = (predicted && actualFinisher && predIdx !== -1 && actualIdx !== -1)
-            ? Math.abs(predIdx - actualIdx)
-            : Infinity;
+          const distance = getRfDist(uid, predicted);
           return { uid, roundData, distance };
         })
         .filter(Boolean);
@@ -2090,6 +2183,7 @@ function CalendarView({ group, user, currentRound }) {
         nickname: data.nickname || memberNicknames[uid] || "Unknown",
         pred: data[roundKey],
         points: scores[uid]?.[roundKey]?.totalPoints ?? null,
+        breakdown: scores[uid]?.[roundKey]?.breakdown ?? null,
       }))
       .sort((a, b) => (b.points ?? -1) - (a.points ?? -1));
 
@@ -2136,6 +2230,9 @@ function CalendarView({ group, user, currentRound }) {
                     <th className="text-left py-1 pr-3">Player</th>
                     <th className="text-center py-1 px-1">Pole</th>
                     {race.isSprint && <th className="text-center py-1 px-1">SQ</th>}
+                    {race.isSprint && <th className="text-center py-1 px-1">SP1</th>}
+                    {race.isSprint && <th className="text-center py-1 px-1">SP2</th>}
+                    {race.isSprint && <th className="text-center py-1 px-1">SP3</th>}
                     <th className="text-center py-1 px-1">P1</th>
                     <th className="text-center py-1 px-1">P2</th>
                     <th className="text-center py-1 px-1">P3</th>
@@ -2144,18 +2241,23 @@ function CalendarView({ group, user, currentRound }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {roundPreds.map(({ userId, nickname, pred, points }) => (
+                  {roundPreds.map(({ userId, nickname, pred, points, breakdown }) => (
                     <tr key={userId} className="border-b border-gray-800 hover:bg-gray-800/50">
                       <td className="py-1 pr-3 font-semibold text-white whitespace-nowrap">{nickname}</td>
                       <td className="py-1 px-1 text-center">{mkCell(pred.pole, raceResults?.pole)}</td>
                       {race.isSprint && <td className="py-1 px-1 text-center">{mkCell(pred.sprintQualPole, raceResults?.sprintQualPole)}</td>}
+                      {race.isSprint && <td className="py-1 px-1 text-center">{mkCell(pred.sprintP1, raceResults?.sprintP1)}</td>}
+                      {race.isSprint && <td className="py-1 px-1 text-center">{mkCell(pred.sprintP2, raceResults?.sprintP2)}</td>}
+                      {race.isSprint && <td className="py-1 px-1 text-center">{mkCell(pred.sprintP3, raceResults?.sprintP3)}</td>}
                       <td className="py-1 px-1 text-center">{mkCell(pred.raceP1, raceResults?.raceP1)}</td>
                       <td className="py-1 px-1 text-center">{mkCell(pred.raceP2, raceResults?.raceP2)}</td>
                       <td className="py-1 px-1 text-center">{mkCell(pred.raceP3, raceResults?.raceP3)}</td>
                       <td className="py-1 px-1 text-center">
-                        {pred.finisherPosition
-                          ? <span className={raceResults && pred.finisherPosition === raceResults.finisherAtPosition ? "text-green-400 font-bold" : "text-gray-300"}>{lastName(pred.finisherPosition)}</span>
-                          : <span className="text-gray-600">—</span>}
+                        {pred.finisherPosition ? (() => {
+                          const rfPts = breakdown?.randomFinisher ?? null;
+                          const color = rfPts > 0 ? "text-green-400 font-bold" : "text-gray-300";
+                          return <span className={color}>{lastName(pred.finisherPosition)}{rfPts !== null ? `/${rfPts}` : ''}</span>;
+                        })() : <span className="text-gray-600">—</span>}
                       </td>
                       <td className="py-1 px-1 text-center font-black text-base">
                         <span className={points !== null ? "text-yellow-400" : "text-gray-500"}>
