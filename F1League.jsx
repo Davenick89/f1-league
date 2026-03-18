@@ -1595,7 +1595,14 @@ function ResultsView({ group, user, currentRound }) {
     ? new Date(raceStartStr).getTime() + 24 * 60 * 60 * 1000
     : null;
   const lockTime = lockTimeMs ? new Date(lockTimeMs) : null;
-  const isLocked = lockTimeMs !== null ? nowTs > lockTimeMs : false;
+  const adminUnlocked = existingResults?.adminUnlocked === true;
+  const isLocked = adminUnlocked ? false : (lockTimeMs !== null ? nowTs > lockTimeMs : false);
+
+  const handleAdminToggleLock = async () => {
+    if (!isAdmin || !existingResults) return;
+    const resultsRef = doc(db, `groups/${group.id}/results`, `round${selectedRound}`);
+    await setDoc(resultsRef, { adminUnlocked: !adminUnlocked }, { merge: true });
+  };
   const msUntilLock = lockTimeMs !== null ? Math.max(0, lockTimeMs - nowTs) : 0;
   const hoursUntilLock = Math.floor(msUntilLock / (1000 * 60 * 60));
   const minutesUntilLock = Math.floor((msUntilLock % (1000 * 60 * 60)) / (1000 * 60));
@@ -1658,12 +1665,37 @@ function ResultsView({ group, user, currentRound }) {
 
         {/* Lock status banner */}
         {isAdmin && lockTime && (
-          isLocked ? (
-            <div className="bg-red-900/40 border border-red-500 p-4 rounded mb-5">
-              <p className="text-red-400 font-bold text-base">⛔ RESULTS LOCKED</p>
-              <p className="text-red-300 text-sm mt-1">
-                The 24-hour editing window closed on {formatUTC(lockTime)}.
-              </p>
+          isLocked && !adminUnlocked ? (
+            <div className="bg-red-900/40 border border-red-500 p-4 rounded mb-5 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-red-400 font-bold text-base">⛔ RESULTS LOCKED</p>
+                <p className="text-red-300 text-sm mt-1">
+                  The 24-hour editing window closed on {formatUTC(lockTime)}.
+                </p>
+              </div>
+              {existingResults && (
+                <button
+                  onClick={handleAdminToggleLock}
+                  className="shrink-0 bg-yellow-600 hover:bg-yellow-500 text-black text-xs font-bold px-3 py-2 rounded"
+                >
+                  🔓 Admin Unlock
+                </button>
+              )}
+            </div>
+          ) : adminUnlocked ? (
+            <div className="bg-yellow-900/40 border border-yellow-500 p-4 rounded mb-5 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-yellow-400 font-bold text-base">🔓 ADMIN OVERRIDE — UNLOCKED</p>
+                <p className="text-yellow-300 text-sm mt-1">
+                  Time lock bypassed. Enter data, then lock this round when done.
+                </p>
+              </div>
+              <button
+                onClick={handleAdminToggleLock}
+                className="shrink-0 bg-red-600 hover:bg-red-500 text-white text-xs font-bold px-3 py-2 rounded"
+              >
+                🔒 Lock Round
+              </button>
             </div>
           ) : (
             <div className="bg-green-900/30 border border-green-600/50 p-4 rounded mb-5">
