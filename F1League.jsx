@@ -2476,7 +2476,8 @@ function AuditView({ group }) {
   };
 
   const players = [...new Set(entries.map((e) => e.nickname))].sort();
-  const rounds  = [...new Set(entries.map((e) => e.round))].sort((a, b) => a - b);
+  // Always show all scheduled rounds, not just ones with audit entries
+  const rounds = F1_SCHEDULE_2026.map((r) => ({ round: r.round, name: r.name }));
 
   const filtered = entries.filter((e) => {
     if (filterPlayer !== "all" && e.nickname !== filterPlayer) return false;
@@ -2518,7 +2519,7 @@ function AuditView({ group }) {
             className="bg-gray-800 border border-gray-700 rounded p-2 text-white text-sm"
           >
             <option value="all">All rounds</option>
-            {rounds.map((r) => <option key={r} value={String(r)}>R{r}</option>)}
+            {rounds.map((r) => <option key={r.round} value={String(r.round)}>R{r.round} — {r.name}</option>)}
           </select>
           <span className="text-gray-500 text-sm self-center">{filtered.length} record{filtered.length !== 1 ? "s" : ""}</span>
         </div>
