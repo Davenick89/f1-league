@@ -1393,7 +1393,7 @@ function ResultsView({ group, user, currentRound }) {
 
   const handleSaveResults = async () => {
     // Hard lock guard — re-check at save time
-    if (lockTimeMs !== null && Date.now() > lockTimeMs) {
+    if (!adminUnlocked && lockTimeMs !== null && Date.now() > lockTimeMs) {
       setMessage("⛔ Results editing locked — 24 hours have passed since race end");
       setTimeout(() => setMessage(""), 4000);
       return;
