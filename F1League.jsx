@@ -3,7 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayRemove, arrayUnion, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
-import { Menu, X, LogOut, Plus, Users, Trophy, BarChart3, Settings, Copy, Check, Calendar, Lock, Edit } from 'lucide-react';
+import { Menu, X, LogOut, Plus, Users, Trophy, BarChart3, Settings, Copy, Check, Calendar, Lock, Edit, Info } from 'lucide-react';
 
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
@@ -1273,6 +1273,168 @@ function LeaderboardView({ group, currentRound }) {
   );
 }
 
+// FIELD HELP CONTENT
+const FIELD_HELP = {
+  pole: {
+    icon: '🏁', label: 'Pole Position',
+    what: 'Who will be fastest in qualifying and start from P1 on the grid?',
+    points: [['✅ Correct prediction', '+1 pt'], ['❌ Wrong prediction', '0 pts']],
+    example: { predict: 'George Russell', result: 'Russell qualifies fastest', earned: '+1' },
+    note: 'Available every race weekend.',
+  },
+  sprintQualPole: {
+    icon: '⚡', label: 'Sprint Quali Pole',
+    what: 'Who will be fastest in the Sprint Shootout qualifying session?',
+    points: [['✅ Correct prediction', '+1 pt'], ['❌ Wrong prediction', '0 pts']],
+    example: { predict: 'Max Verstappen', result: 'Verstappen tops sprint quali', earned: '+1' },
+    note: 'Sprint weekends only.',
+  },
+  sprintP1: {
+    icon: '🥇', label: 'Sprint P1 (Winner)',
+    what: 'Who will finish 1st in the Sprint race?',
+    points: [['✅ Correct prediction', '+1 pt'], ['❌ Wrong prediction', '0 pts']],
+    example: { predict: 'Oscar Piastri', result: 'Piastri wins the sprint', earned: '+1' },
+    note: 'Sprint weekends only.',
+  },
+  sprintP2: {
+    icon: '🥈', label: 'Sprint P2',
+    what: 'Who will finish 2nd in the Sprint race?',
+    points: [['✅ Correct prediction', '+1 pt'], ['❌ Wrong prediction', '0 pts']],
+    example: { predict: 'Lando Norris', result: 'Norris finishes 2nd in sprint', earned: '+1' },
+    note: 'Sprint weekends only.',
+  },
+  sprintP3: {
+    icon: '🥉', label: 'Sprint P3',
+    what: 'Who will finish 3rd in the Sprint race?',
+    points: [['✅ Correct prediction', '+1 pt'], ['❌ Wrong prediction', '0 pts']],
+    example: { predict: 'Charles Leclerc', result: 'Leclerc finishes 3rd in sprint', earned: '+1' },
+    note: 'Sprint weekends only.',
+  },
+  raceP1: {
+    icon: '🏆', label: 'Race P1 (Winner)',
+    what: 'Who will finish 1st in the main Grand Prix?',
+    points: [['✅ Correct prediction', '+1 pt'], ['❌ Wrong prediction', '0 pts']],
+    example: { predict: 'Lando Norris', result: 'Norris wins the race', earned: '+1' },
+    note: 'Available every race weekend.',
+  },
+  raceP2: {
+    icon: '🥈', label: 'Race P2',
+    what: 'Who will finish 2nd in the main Grand Prix?',
+    points: [['✅ Correct prediction', '+1 pt'], ['❌ Wrong prediction', '0 pts']],
+    example: { predict: 'George Russell', result: 'Russell finishes 2nd', earned: '+1' },
+    note: 'Available every race weekend.',
+  },
+  raceP3: {
+    icon: '🥉', label: 'Race P3',
+    what: 'Who will finish 3rd in the main Grand Prix?',
+    points: [['✅ Correct prediction', '+1 pt'], ['❌ Wrong prediction', '0 pts']],
+    example: { predict: 'Carlos Sainz', result: 'Sainz finishes 3rd', earned: '+1' },
+    note: 'Available every race weekend.',
+  },
+  finisherPosition: {
+    icon: '🎲', label: 'R# Random Finisher',
+    what: 'A random finishing position (P4–P22) is drawn before the race. Pick the driver you think will finish closest to that secret position.',
+    points: [
+      ['✅ Exact match (your driver hits the exact position)', '+2 pts'],
+      ['🎯 Closest prediction (no one else is nearer)', '+1 pt'],
+      ['❌ Not the closest', '0 pts'],
+    ],
+    example: { predict: 'Carlos Sainz (you pick him)', result: 'R# = P10. Sainz finishes P9 (1 away). No one else is closer.', earned: '+1' },
+    note: 'Driver must start the race (DNS = 0 pts). Ties split the +1 — only one player can earn +2.',
+  },
+};
+
+// Info button + modal for prediction fields
+function FieldHelpModal({ fieldKey, onClose }) {
+  const h = FIELD_HELP[fieldKey];
+  if (!h) return null;
+
+  // Close on Escape key
+  React.useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50"
+      onClick={e => e.target === e.currentTarget && onClose()}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Help: ${h.label}`}
+    >
+      <div className="bg-gray-900 border border-red-600/60 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4" style={{ background: 'rgba(220,0,0,0.12)', borderBottom: '1px solid rgba(220,0,0,0.25)' }}>
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">{h.icon}</span>
+            <span className="font-black text-white text-base" style={{ fontFamily: "'Orbitron'" }}>{h.label}</span>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close help modal"
+            className="text-gray-500 hover:text-white transition p-1 rounded-lg hover:bg-gray-800"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4 text-sm">
+          {/* What to predict */}
+          <div>
+            <p className="text-xs font-black text-gray-500 tracking-widest mb-1.5">WHAT TO PREDICT</p>
+            <p className="text-gray-200 leading-relaxed">{h.what}</p>
+          </div>
+
+          {/* Points */}
+          <div>
+            <p className="text-xs font-black text-gray-500 tracking-widest mb-1.5">HOW POINTS WORK</p>
+            <div className="space-y-1.5">
+              {h.points.map(([desc, pts]) => (
+                <div key={desc} className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2">
+                  <span className="text-gray-300 text-xs">{desc}</span>
+                  <span className={`font-black text-xs ml-3 shrink-0 ${pts.startsWith('+') ? 'text-green-400' : 'text-gray-600'}`}>{pts}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Example */}
+          <div className="bg-gray-800/60 border border-gray-700/60 rounded-xl p-4">
+            <p className="text-xs font-black text-gray-500 tracking-widest mb-2">EXAMPLE</p>
+            <div className="space-y-1 text-xs">
+              <div className="flex gap-2"><span className="text-gray-500 w-16 shrink-0">You pick:</span><span className="text-white">{h.example.predict}</span></div>
+              <div className="flex gap-2"><span className="text-gray-500 w-16 shrink-0">Result:</span><span className="text-gray-300">{h.example.result}</span></div>
+              <div className="flex gap-2 pt-1 border-t border-gray-700 mt-1"><span className="text-gray-500 w-16 shrink-0">Earned:</span><span className="text-green-400 font-black">{h.example.earned}</span></div>
+            </div>
+          </div>
+
+          {/* Note */}
+          {h.note && (
+            <p className="text-xs text-gray-600 italic">{h.note}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Inline info icon button
+function InfoBtn({ fieldKey, onOpen }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(fieldKey)}
+      aria-label={`Help with ${FIELD_HELP[fieldKey]?.label}`}
+      className="ml-1.5 text-gray-600 hover:text-blue-400 transition-colors align-middle inline-flex items-center"
+      tabIndex={-1}
+    >
+      <Info size={13} />
+    </button>
+  );
+}
+
 // PREDICTION VIEW - COMPLETE REBUILD
 function PredictionView({ group, race, currentRound, countdown, user }) {
   const [predictions, setPredictions] = useState({
@@ -1290,6 +1452,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
   const [randomGeneratedBy, setRandomGeneratedBy] = useState(null);
   const [message, setMessage] = useState("");
   const [isEditing, setIsEditing] = useState(false);
+  const [helpField, setHelpField] = useState(null);
   const [userHasPredictions, setUserHasPredictions] = useState(false);
   const [allPredictions, setAllPredictions] = useState([]);
   const [allResults, setAllResults] = useState(null);
@@ -1607,7 +1770,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div>
-                <label className="block text-sm font-bold mb-2">Pole Position</label>
+                <label className="block text-sm font-bold mb-2">Pole Position <InfoBtn fieldKey="pole" onOpen={setHelpField} /></label>
                 <select value={predictions.pole} onChange={(e) => handlePredictionChange('pole', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white text-sm">
                   <option value="">Select</option>
                   {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
@@ -1616,7 +1779,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
 
               {race.isSprint && (
                 <div>
-                  <label className="block text-sm font-bold mb-2">Sprint Quali Pole</label>
+                  <label className="block text-sm font-bold mb-2">Sprint Quali Pole <InfoBtn fieldKey="sprintQualPole" onOpen={setHelpField} /></label>
                   <select value={predictions.sprintQualPole} onChange={(e) => handlePredictionChange('sprintQualPole', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white text-sm">
                     <option value="">Select</option>
                     {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
@@ -1627,21 +1790,21 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
               {race.isSprint && (
                 <>
                   <div>
-                    <label className="block text-sm font-bold mb-2">Sprint P1</label>
+                    <label className="block text-sm font-bold mb-2">Sprint P1 <InfoBtn fieldKey="sprintP1" onOpen={setHelpField} /></label>
                     <select value={predictions.sprintP1} onChange={(e) => handlePredictionChange('sprintP1', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white text-sm">
                       <option value="">Select</option>
                       {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-bold mb-2">Sprint P2</label>
+                    <label className="block text-sm font-bold mb-2">Sprint P2 <InfoBtn fieldKey="sprintP2" onOpen={setHelpField} /></label>
                     <select value={predictions.sprintP2} onChange={(e) => handlePredictionChange('sprintP2', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white text-sm">
                       <option value="">Select</option>
                       {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-bold mb-2">Sprint P3</label>
+                    <label className="block text-sm font-bold mb-2">Sprint P3 <InfoBtn fieldKey="sprintP3" onOpen={setHelpField} /></label>
                     <select value={predictions.sprintP3} onChange={(e) => handlePredictionChange('sprintP3', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white text-sm">
                       <option value="">Select</option>
                       {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
@@ -1651,21 +1814,21 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
               )}
 
               <div>
-                <label className="block text-sm font-bold mb-2">Race P1</label>
+                <label className="block text-sm font-bold mb-2">Race P1 <InfoBtn fieldKey="raceP1" onOpen={setHelpField} /></label>
                 <select value={predictions.raceP1} onChange={(e) => handlePredictionChange('raceP1', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white text-sm">
                   <option value="">Select</option>
                   {getAvailableForP1().map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-bold mb-2">Race P2</label>
+                <label className="block text-sm font-bold mb-2">Race P2 <InfoBtn fieldKey="raceP2" onOpen={setHelpField} /></label>
                 <select value={predictions.raceP2} onChange={(e) => handlePredictionChange('raceP2', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white text-sm">
                   <option value="">Select</option>
                   {getAvailableForP2().map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-bold mb-2">Race P3</label>
+                <label className="block text-sm font-bold mb-2">Race P3 <InfoBtn fieldKey="raceP3" onOpen={setHelpField} /></label>
                 <select value={predictions.raceP3} onChange={(e) => handlePredictionChange('raceP3', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white text-sm">
                   <option value="">Select</option>
                   {getAvailableForP3().map(d => <option key={d} value={d}>{d}</option>)}
@@ -1673,7 +1836,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
               </div>
 
               <div className="md:col-span-2">
-                <label className="block text-sm font-bold mb-2">Driver at P{randomNumber || "?"}</label>
+                <label className="block text-sm font-bold mb-2">Driver at P{randomNumber || "?"} <InfoBtn fieldKey="finisherPosition" onOpen={setHelpField} /></label>
                 <select value={predictions.finisherPosition} onChange={(e) => handlePredictionChange('finisherPosition', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white text-sm">
                   <option value="">Select (excluding podium)</option>
                   {getAvailableForFinisher().map(d => <option key={d} value={d}>{d}</option>)}
@@ -1815,6 +1978,8 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
           );
         })()}
       </div>
+
+      {helpField && <FieldHelpModal fieldKey={helpField} onClose={() => setHelpField(null)} />}
     </div>
   );
 }
