@@ -481,65 +481,81 @@ export default function F1League() {
 
   if (!selectedGroup) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-950 via-red-950 to-gray-950 p-4">
+      <div className="min-h-screen bg-black p-4 text-white">
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap');`}</style>
         <div className="max-w-2xl mx-auto">
-          <div className="flex justify-between items-center mb-8">
-            <h1 className="text-3xl font-black text-white" style={{ fontFamily: "'Orbitron'", color: '#ff0000' }}>F1 LEAGUE</h1>
-            <div className="flex gap-2">
-              <button onClick={() => setShowSettings(true)} className="text-gray-400 hover:text-white p-2"><Settings size={24} /></button>
-              <button onClick={handleSignOut} className="text-gray-400 hover:text-white p-2"><LogOut size={24} /></button>
+          {/* Header */}
+          <div className="flex justify-between items-center mb-10 pt-4">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl font-black" style={{ fontFamily: 'Orbitron', color: '#DC0000' }}>F1</span>
+              <span className="text-xl font-black" style={{ fontFamily: 'Orbitron' }}>KARVAAN</span>
+            </div>
+            <div className="flex gap-1">
+              <button onClick={() => setShowSettings(true)} className="text-gray-600 hover:text-white p-2 rounded-xl hover:bg-gray-900 transition"><Settings size={20} /></button>
+              <button onClick={handleSignOut} className="text-gray-600 hover:text-white p-2 rounded-xl hover:bg-gray-900 transition"><LogOut size={20} /></button>
             </div>
           </div>
 
-          <div className="space-y-4">
+          <p className="text-xs font-black text-gray-600 tracking-widest mb-4">YOUR LEAGUES</p>
+
+          <div className="space-y-3">
+            {groups.length === 0 && (
+              <p className="text-gray-600 text-sm text-center py-8">No leagues yet — create one below.</p>
+            )}
             {groups.map(group => (
-              <div key={group.id} className="bg-gray-900 border-2 border-red-600 p-4 rounded-lg flex justify-between items-center">
-                <button onClick={() => setSelectedGroup(group)} className="text-left flex-1">
-                  <h3 className="text-xl font-bold text-white mb-1">{group.name}</h3>
-                  <p className="text-sm text-gray-400">{group.members.length} members</p>
+              <div key={group.id} className="bg-gray-950 border border-gray-800 rounded-2xl overflow-hidden hover:border-red-600/40 transition group">
+                <button onClick={() => setSelectedGroup(group)} className="text-left w-full p-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-black text-white group-hover:text-red-400 transition">{group.name}</h3>
+                      <p className="text-xs text-gray-600 mt-1">{group.members.length} member{group.members.length !== 1 ? 's' : ''}{group.admin === user.uid ? ' · Admin' : ''}</p>
+                    </div>
+                    <span className="text-gray-700 group-hover:text-red-600 transition text-xl">›</span>
+                  </div>
                 </button>
                 {group.admin === user.uid && (
-                  <div className="flex gap-2 ml-4">
-                    <button onClick={() => { setRenameTarget(group); setRenameValue(group.name); }} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm font-bold">Rename</button>
-                    <button onClick={() => setDeleteConfirm(group.id)} className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded text-sm font-bold">Delete</button>
+                  <div className="flex gap-2 px-5 pb-4">
+                    <button onClick={() => { setRenameTarget(group); setRenameValue(group.name); }} className="px-3 py-1.5 bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-white rounded-lg text-xs font-bold transition">Rename</button>
+                    <button onClick={() => setDeleteConfirm(group.id)} className="px-3 py-1.5 bg-gray-900 hover:bg-red-900 text-gray-600 hover:text-red-400 rounded-lg text-xs font-bold transition">Delete</button>
                   </div>
                 )}
               </div>
             ))}
           </div>
 
-          <button onClick={() => setShowCreateGroup(true)} className="w-full mt-6 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg flex items-center justify-center gap-2">
-            <Plus size={20} /> Create New League
+          <button onClick={() => setShowCreateGroup(true)} className="w-full mt-5 bg-red-600 hover:bg-red-700 text-white font-black py-3.5 px-6 rounded-full flex items-center justify-center gap-2 transition">
+            <Plus size={18} /> Create New League
           </button>
 
           {showCreateGroup && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-              <div className="bg-gray-900 border-2 border-red-600 rounded-lg p-6 w-full max-w-md">
-                <h2 className="text-2xl font-bold text-white mb-4">Create League</h2>
-                <input type="text" placeholder="League name" value={groupName} onChange={(e) => setGroupName(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded p-3 text-white mb-4 focus:outline-none focus:border-red-600" />
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" onClick={e => e.target === e.currentTarget && setShowCreateGroup(false)}>
+              <div className="bg-gray-950 border border-gray-800 rounded-2xl p-6 w-full max-w-md">
+                <h2 className="text-lg font-black text-white mb-5" style={{ fontFamily: 'Orbitron' }}>CREATE LEAGUE</h2>
+                <label className="block text-xs font-black text-gray-600 tracking-widest mb-2">LEAGUE NAME</label>
+                <input type="text" placeholder="e.g. Karvaan F1 2026" value={groupName} onChange={(e) => setGroupName(e.target.value)} onKeyDown={e => e.key === 'Enter' && createNewGroup()} autoFocus className="w-full bg-gray-900 border-2 border-gray-800 focus:border-red-600 rounded-xl p-3.5 text-white mb-5 outline-none transition" />
                 <div className="flex gap-2">
-                  <button onClick={createNewGroup} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded">Create</button>
-                  <button onClick={() => setShowCreateGroup(false)} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 rounded">Cancel</button>
+                  <button onClick={createNewGroup} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-black py-2.5 rounded-xl transition">Create</button>
+                  <button onClick={() => setShowCreateGroup(false)} className="flex-1 bg-gray-900 hover:bg-gray-800 text-gray-400 font-bold py-2.5 rounded-xl transition">Cancel</button>
                 </div>
               </div>
             </div>
           )}
 
           {showSettings && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-              <div className="bg-gray-900 border-2 border-red-600 rounded-lg p-6 w-full max-w-md space-y-6">
-                <h2 className="text-2xl font-bold text-white" style={{ fontFamily: "'Orbitron'" }}>SETTINGS</h2>
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 overflow-y-auto" onClick={e => e.target === e.currentTarget && setShowSettings(false)}>
+              <div className="bg-gray-950 border border-gray-800 rounded-2xl p-6 w-full max-w-md space-y-5 my-4">
+                <h2 className="text-xl font-black text-white" style={{ fontFamily: 'Orbitron' }}>SETTINGS</h2>
 
                 {/* Nickname */}
                 <div>
-                  <label className="block text-sm font-bold text-gray-400 mb-2">Nickname</label>
-                  <input type="text" placeholder="Enter your nickname" value={nickname} onChange={(e) => setNickname(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded p-3 text-white focus:outline-none focus:border-red-600" />
-                  <button onClick={saveNickname} className="mt-2 w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded">Save Nickname</button>
+                  <label className="block text-xs font-black text-gray-600 tracking-widest mb-2">NICKNAME</label>
+                  <input type="text" placeholder="Enter your nickname" value={nickname} onChange={(e) => setNickname(e.target.value)} className="w-full bg-gray-900 border-2 border-gray-800 focus:border-red-600 rounded-xl p-3 text-white outline-none transition" />
+                  <button onClick={saveNickname} className="mt-2 w-full bg-red-600 hover:bg-red-700 text-white font-black py-2.5 rounded-xl transition">Save Nickname</button>
                 </div>
 
                 {/* Push Notifications */}
-                <div className="border-t border-gray-700 pt-5">
-                  <p className="text-sm font-bold text-gray-400 mb-3">PUSH NOTIFICATIONS</p>
+                <div className="border-t border-gray-800 pt-5">
+                  <p className="text-xs font-black text-gray-600 tracking-widest mb-3">PUSH NOTIFICATIONS</p>
                   {!messaging ? (
                     <p className="text-xs text-gray-500">Not supported in this browser.</p>
                   ) : (
@@ -585,8 +601,8 @@ export default function F1League() {
                 </div>
 
                 {/* Email Notifications */}
-                <div className="border-t border-gray-700 pt-5">
-                  <p className="text-sm font-bold text-gray-400 mb-3">EMAIL NOTIFICATIONS</p>
+                <div className="border-t border-gray-800 pt-5">
+                  <p className="text-xs font-black text-gray-600 tracking-widest mb-3">EMAIL NOTIFICATIONS</p>
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <div>
@@ -612,38 +628,39 @@ export default function F1League() {
                   </div>
                 </div>
 
-                <button onClick={() => setShowSettings(false)} className="w-full bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 rounded">Close</button>
+                <button onClick={() => setShowSettings(false)} className="w-full bg-gray-900 hover:bg-gray-800 text-gray-400 font-bold py-2.5 rounded-xl transition">Close</button>
               </div>
             </div>
           )}
 
           {deleteConfirm && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-              <div className="bg-gray-900 border-2 border-red-600 rounded-lg p-6 w-full max-w-md">
-                <h2 className="text-2xl font-bold text-white mb-4">Delete League?</h2>
-                <p className="text-gray-300 mb-6">Are you sure you want to leave this league?</p>
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" onClick={e => e.target === e.currentTarget && setDeleteConfirm(null)}>
+              <div className="bg-gray-950 border border-gray-800 rounded-2xl p-6 w-full max-w-md">
+                <h2 className="text-lg font-black text-white mb-2" style={{ fontFamily: 'Orbitron' }}>DELETE LEAGUE?</h2>
+                <p className="text-gray-500 text-sm mb-6">You will be removed from this league. This cannot be undone.</p>
                 <div className="flex gap-2">
-                  <button onClick={() => deleteLeague(deleteConfirm)} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded">Delete</button>
-                  <button onClick={() => setDeleteConfirm(null)} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 rounded">Cancel</button>
+                  <button onClick={() => deleteLeague(deleteConfirm)} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-black py-2.5 rounded-xl transition">Delete</button>
+                  <button onClick={() => setDeleteConfirm(null)} className="flex-1 bg-gray-900 hover:bg-gray-800 text-gray-400 font-bold py-2.5 rounded-xl transition">Cancel</button>
                 </div>
               </div>
             </div>
           )}
 
           {renameTarget && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-              <div className="bg-gray-900 border-2 border-red-600 rounded-lg p-6 w-full max-w-md">
-                <h2 className="text-2xl font-bold text-white mb-4">Rename League</h2>
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" onClick={e => e.target === e.currentTarget && setRenameTarget(null)}>
+              <div className="bg-gray-950 border border-gray-800 rounded-2xl p-6 w-full max-w-md">
+                <h2 className="text-lg font-black text-white mb-5" style={{ fontFamily: 'Orbitron' }}>RENAME LEAGUE</h2>
                 <input
                   type="text"
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && renameLeague()}
-                  className="w-full bg-gray-800 border border-gray-700 rounded p-3 text-white mb-4 focus:outline-none focus:border-red-600"
+                  className="w-full bg-gray-900 border-2 border-gray-800 focus:border-red-600 rounded-xl p-3.5 text-white mb-5 outline-none transition"
+                  autoFocus
                 />
                 <div className="flex gap-2">
-                  <button onClick={renameLeague} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded">Save</button>
-                  <button onClick={() => setRenameTarget(null)} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 rounded">Cancel</button>
+                  <button onClick={renameLeague} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-black py-2.5 rounded-xl transition">Save</button>
+                  <button onClick={() => setRenameTarget(null)} className="flex-1 bg-gray-900 hover:bg-gray-800 text-gray-400 font-bold py-2.5 rounded-xl transition">Cancel</button>
                 </div>
               </div>
             </div>
@@ -656,53 +673,63 @@ export default function F1League() {
   const race = F1_SCHEDULE_2026[currentRound - 1];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-950 via-red-950 to-gray-950 text-white">
+    <div className="min-h-screen bg-black text-white">
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap');`}</style>
 
-      <div className="bg-black/40 border-b border-red-600/50 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-          <div>
-            <h1 className="text-2xl font-black" style={{ fontFamily: "'Orbitron'", color: '#ff0000' }}>F1 2026</h1>
-            <p className="text-sm text-gray-400">{selectedGroup.name}</p>
+      <nav style={{ background: 'rgba(0,0,0,0.97)', borderBottom: '1px solid rgba(220,0,0,0.3)' }} className="sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <button onClick={() => setSelectedGroup(null)} className="flex items-center gap-1.5 hover:opacity-80 transition-opacity">
+              <span className="text-xl font-black" style={{ fontFamily: 'Orbitron', color: '#DC0000' }}>F1</span>
+              <span className="text-lg font-black text-white" style={{ fontFamily: 'Orbitron' }}>KARVAAN</span>
+            </button>
+            <span className="hidden sm:block text-gray-700 mx-2">|</span>
+            <span className="hidden sm:block text-gray-400 text-sm font-semibold truncate max-w-[180px]">{selectedGroup.name}</span>
           </div>
         </div>
-      </div>
+      </nav>
 
-      <div className="max-w-7xl mx-auto px-4 py-8">
+      <div className="max-w-7xl mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* Sidebar */}
           <div className="lg:col-span-1">
-            <div className="bg-gray-900 border border-red-600/50 rounded-lg p-4 space-y-2">
-              <button onClick={() => setCurrentView("leaderboard")} className={`w-full text-left p-3 rounded flex items-center gap-2 transition ${currentView === "leaderboard" ? "bg-red-600" : "hover:bg-gray-800"}`}>
-                <Trophy size={18} /> Leaderboard
-              </button>
-              <button onClick={() => setCurrentView("predict")} className={`w-full text-left p-3 rounded flex items-center gap-2 transition ${currentView === "predict" ? "bg-red-600" : "hover:bg-gray-800"}`}>
-                <BarChart3 size={18} /> Predictions
-              </button>
-              <button onClick={() => setCurrentView("seasonBoard")} className={`w-full text-left p-3 rounded flex items-center gap-2 transition ${currentView === "seasonBoard" ? "bg-red-600" : "hover:bg-gray-800"}`}>
-                ⭐ Season Board
-              </button>
-              <button onClick={() => setCurrentView("howToPlay")} className={`w-full text-left p-3 rounded flex items-center gap-2 transition ${currentView === "howToPlay" ? "bg-red-600" : "hover:bg-gray-800"}`}>
-                ❓ How to Play
-              </button>
-              <button onClick={() => setCurrentView("calendar")} className={`w-full text-left p-3 rounded flex items-center gap-2 transition ${currentView === "calendar" ? "bg-red-600" : "hover:bg-gray-800"}`}>
-                <Calendar size={18} /> Calendar
-              </button>
-              <button onClick={() => setCurrentView("results")} className={`w-full text-left p-3 rounded flex items-center gap-2 transition ${currentView === "results" ? "bg-red-600" : "hover:bg-gray-800"}`}>
-                📊 Results
-              </button>
-              <button onClick={() => setCurrentView("invites")} className={`w-full text-left p-3 rounded flex items-center gap-2 transition ${currentView === "invites" ? "bg-red-600" : "hover:bg-gray-800"}`}>
-                <Users size={18} /> Invite
-              </button>
+            <div className="bg-gray-950 border border-gray-800 rounded-2xl p-3 space-y-1">
+              {[
+                { view: "leaderboard", icon: <Trophy size={16} />, label: "Leaderboard" },
+                { view: "predict",     icon: <BarChart3 size={16} />, label: "Predictions" },
+                { view: "seasonBoard", icon: <span className="text-sm">⭐</span>, label: "Season Board" },
+                { view: "howToPlay",   icon: <span className="text-sm">📖</span>, label: "How to Play" },
+                { view: "calendar",    icon: <Calendar size={16} />, label: "Calendar" },
+                { view: "results",     icon: <span className="text-sm">📊</span>, label: "Results" },
+                { view: "invites",     icon: <Users size={16} />, label: "Invite" },
+              ].map(({ view, icon, label }) => (
+                <button
+                  key={view}
+                  onClick={() => setCurrentView(view)}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-2.5 transition text-sm font-semibold ${
+                    currentView === view
+                      ? "bg-red-600 text-white"
+                      : "text-gray-500 hover:text-white hover:bg-gray-900"
+                  }`}
+                >
+                  {icon} {label}
+                </button>
+              ))}
               {selectedGroup.admin === user.uid && (
-                <button onClick={() => setCurrentView("audit")} className={`w-full text-left p-3 rounded flex items-center gap-2 transition ${currentView === "audit" ? "bg-red-600" : "hover:bg-gray-800"} text-yellow-400`}>
-                  🔍 Audit Log
+                <button
+                  onClick={() => setCurrentView("audit")}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-2.5 transition text-sm font-semibold ${
+                    currentView === "audit" ? "bg-yellow-600 text-white" : "text-yellow-600 hover:bg-yellow-600/10"
+                  }`}
+                >
+                  <span className="text-sm">🔍</span> Audit Log
                 </button>
               )}
-              <hr className="border-red-600/30 my-4" />
-              <button onClick={() => setShowSettings(true)} className="w-full text-left p-3 rounded hover:bg-gray-800 flex items-center gap-2 transition text-gray-400"><Settings size={18} /> Settings</button>
-              <button onClick={() => setSelectedGroup(null)} className="w-full text-left p-3 rounded hover:bg-gray-800 flex items-center gap-2 transition text-gray-400">← Back</button>
-              <button onClick={handleSignOut} className="w-full text-left p-3 rounded hover:bg-gray-800 flex items-center gap-2 transition text-gray-400"><LogOut size={18} /> Sign out</button>
+              <div className="border-t border-gray-800 my-2 pt-2 space-y-1">
+                <button onClick={() => setShowSettings(true)} className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-gray-900 flex items-center gap-2.5 transition text-sm text-gray-600 hover:text-gray-400"><Settings size={16} /> Settings</button>
+                <button onClick={() => setSelectedGroup(null)} className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-gray-900 flex items-center gap-2.5 transition text-sm text-gray-600 hover:text-gray-400">← Leagues</button>
+                <button onClick={handleSignOut} className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-gray-900 flex items-center gap-2.5 transition text-sm text-gray-600 hover:text-gray-400"><LogOut size={16} /> Sign out</button>
+              </div>
             </div>
           </div>
 
@@ -721,24 +748,24 @@ export default function F1League() {
       </div>
 
       {pendingInvite && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 border-2 border-red-600 rounded-lg p-6 w-full max-w-sm text-center">
-            <div className="text-4xl mb-3">🏎️</div>
-            <h2 className="text-xl font-bold text-white mb-1" style={{ fontFamily: "'Orbitron'" }}>You're Invited!</h2>
-            <p className="text-gray-400 text-sm mb-4">Join the league</p>
-            <div className="bg-gray-800 rounded-lg p-4 mb-5">
-              <p className="text-2xl font-black text-red-500" style={{ fontFamily: "'Orbitron'" }}>{pendingInvite.leagueName}</p>
-              <p className="text-gray-400 text-sm mt-1">{pendingInvite.memberCount} member{pendingInvite.memberCount !== 1 ? 's' : ''}</p>
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-950 border border-gray-800 rounded-2xl p-6 w-full max-w-sm text-center">
+            <div className="text-4xl mb-4">🏎️</div>
+            <h2 className="text-lg font-black text-white mb-1" style={{ fontFamily: 'Orbitron' }}>YOU'RE INVITED!</h2>
+            <p className="text-gray-500 text-xs mb-5">Join the league</p>
+            <div className="bg-gray-900 rounded-2xl p-4 mb-5">
+              <p className="text-xl font-black" style={{ color: '#DC0000', fontFamily: 'Orbitron' }}>{pendingInvite.leagueName}</p>
+              <p className="text-gray-500 text-xs mt-1">{pendingInvite.memberCount} member{pendingInvite.memberCount !== 1 ? 's' : ''}</p>
             </div>
             {pendingInvite.alreadyMember ? (
               <div>
-                <p className="text-green-400 text-sm mb-4">You're already a member of this league.</p>
-                <button onClick={() => setPendingInvite(null)} className="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 rounded">Close</button>
+                <p className="text-green-400 text-sm mb-4">You're already a member.</p>
+                <button onClick={() => setPendingInvite(null)} className="w-full bg-gray-900 hover:bg-gray-800 text-white font-bold py-2.5 rounded-xl transition">Close</button>
               </div>
             ) : (
               <div className="flex gap-2">
-                <button onClick={acceptInvite} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded">Join League</button>
-                <button onClick={() => setPendingInvite(null)} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 rounded">Decline</button>
+                <button onClick={acceptInvite} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-black py-2.5 rounded-xl transition">Join League</button>
+                <button onClick={() => setPendingInvite(null)} className="flex-1 bg-gray-900 hover:bg-gray-800 text-gray-400 font-bold py-2.5 rounded-xl transition">Decline</button>
               </div>
             )}
           </div>
@@ -746,13 +773,14 @@ export default function F1League() {
       )}
 
       {showSettings && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 border-2 border-red-600 rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-2xl font-bold text-white mb-4">Settings</h2>
-            <input type="text" placeholder="Enter your nickname" value={nickname} onChange={(e) => setNickname(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded p-3 text-white mb-4 focus:outline-none focus:border-red-600" />
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50" onClick={e => e.target === e.currentTarget && setShowSettings(false)}>
+          <div className="bg-gray-950 border border-gray-800 rounded-2xl p-6 w-full max-w-md">
+            <h2 className="text-xl font-black text-white mb-5" style={{ fontFamily: 'Orbitron' }}>SETTINGS</h2>
+            <label className="block text-xs font-black text-gray-600 tracking-widest mb-2">NICKNAME</label>
+            <input type="text" placeholder="Enter your nickname" value={nickname} onChange={(e) => setNickname(e.target.value)} className="w-full bg-gray-900 border-2 border-gray-800 focus:border-red-600 rounded-xl p-3 text-white mb-4 outline-none transition" />
             <div className="flex gap-2">
-              <button onClick={saveNickname} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded">Save</button>
-              <button onClick={() => setShowSettings(false)} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 rounded">Cancel</button>
+              <button onClick={saveNickname} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-black py-2.5 rounded-xl transition">Save</button>
+              <button onClick={() => setShowSettings(false)} className="flex-1 bg-gray-900 hover:bg-gray-800 text-gray-400 font-bold py-2.5 rounded-xl transition">Cancel</button>
             </div>
           </div>
         </div>
@@ -1249,21 +1277,24 @@ function LeaderboardView({ group, currentRound }) {
   }, [group, currentRound]);
 
   return (
-    <div className="bg-gray-900 border border-red-600/50 rounded-lg p-6">
-      <h2 className="text-2xl font-bold mb-4" style={{ fontFamily: "'Orbitron'" }}>CHAMPIONSHIP STANDINGS</h2>
+    <div className="bg-gray-950 border border-gray-800 rounded-2xl p-6">
+      <h2 className="text-xl font-black mb-1 tracking-wider" style={{ fontFamily: 'Orbitron' }}>CHAMPIONSHIP</h2>
+      <p className="text-xs text-gray-600 tracking-widest mb-5">STANDINGS</p>
       {leaderboard.length === 0 ? (
-        <p className="text-gray-400 text-center py-8">No predictions yet</p>
+        <p className="text-gray-600 text-center py-10 text-sm">No predictions yet — be the first!</p>
       ) : (
         <div className="space-y-2">
           {leaderboard.map((entry, index) => (
-            <div key={entry.userId} className="bg-gray-800 p-4 rounded flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <span className="text-2xl font-black text-red-600 w-8 text-center">{index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : index + 1}</span>
-                <p className="font-bold">{entry.nickname}</p>
+            <div key={entry.userId} className={`rounded-xl p-4 flex items-center justify-between transition ${index === 0 ? 'bg-gradient-to-r from-yellow-900/30 to-gray-900 border border-yellow-600/30' : 'bg-gray-900 hover:bg-gray-800'}`}>
+              <div className="flex items-center gap-3">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg font-black shrink-0 ${index === 0 ? 'bg-yellow-600/20' : index === 1 ? 'bg-gray-600/20' : index === 2 ? 'bg-orange-700/20' : 'bg-gray-800'}`}>
+                  {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : <span className="text-sm text-gray-500">{index + 1}</span>}
+                </div>
+                <p className="font-bold text-white text-sm">{entry.nickname}</p>
               </div>
               <div className="text-right">
-                <p className="text-3xl font-black text-red-600">{entry.totalPoints}</p>
-                <p className="text-xs text-gray-400">PTS</p>
+                <p className="text-2xl font-black" style={{ color: index === 0 ? '#FFD700' : '#DC0000' }}>{entry.totalPoints}</p>
+                <p className="text-xs text-gray-600 tracking-widest">PTS</p>
               </div>
             </div>
           ))}
@@ -2132,20 +2163,21 @@ function HowToPlayView() {
   const [tab, setTab] = useState("player");
 
   return (
-    <div className="bg-gray-900 border border-red-600/50 rounded-lg p-6">
-      <h2 className="text-2xl font-bold mb-6" style={{ fontFamily: "'Orbitron'" }}>❓ HOW TO PLAY</h2>
+    <div className="bg-gray-950 border border-gray-800 rounded-2xl p-6">
+      <h2 className="text-xl font-black mb-1 tracking-wider" style={{ fontFamily: 'Orbitron' }}>HOW TO PLAY</h2>
+      <p className="text-xs text-gray-600 tracking-widest mb-5">GAME GUIDE</p>
 
       {/* Tab switcher */}
       <div className="flex gap-2 mb-6">
         <button
           onClick={() => setTab("player")}
-          className={`flex-1 py-2 rounded font-bold text-sm transition ${tab === "player" ? "bg-red-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"}`}
+          className={`flex-1 py-2 rounded-full font-bold text-xs transition tracking-wide ${tab === "player" ? "bg-red-600 text-white" : "bg-gray-900 border border-gray-800 text-gray-500 hover:text-white"}`}
         >
           🏎 Player Rules
         </button>
         <button
           onClick={() => setTab("admin")}
-          className={`flex-1 py-2 rounded font-bold text-sm transition ${tab === "admin" ? "bg-red-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"}`}
+          className={`flex-1 py-2 rounded-full font-bold text-xs transition tracking-wide ${tab === "admin" ? "bg-red-600 text-white" : "bg-gray-900 border border-gray-800 text-gray-500 hover:text-white"}`}
         >
           ⚙️ Admin Guide
         </button>
@@ -3076,10 +3108,10 @@ function InvitesView({ group, user, generateInviteCode, inviteLink, inviteStats,
   };
 
   return (
-    <div className="bg-gray-900 border border-red-600/50 rounded-lg p-6">
+    <div className="bg-gray-950 border border-gray-800 rounded-2xl p-6">
       <h2 className="text-2xl font-bold mb-4" style={{ fontFamily: "'Orbitron'" }}>INVITE FRIENDS</h2>
 
-      <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6">
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-6">
         {inviteLink ? (
           <div>
             <p className="text-xs text-gray-400 mb-2">Invite link (single-use code):</p>
@@ -3616,7 +3648,7 @@ function AuditView({ group }) {
 
   return (
     <div className="space-y-4">
-      <div className="bg-gray-900 border border-yellow-600/50 rounded-lg p-6">
+      <div className="bg-gray-950 border border-gray-800 rounded-2xl p-6">
         <h2 className="text-2xl font-bold mb-1" style={{ fontFamily: "'Orbitron'" }}>🔍 AUDIT LOG</h2>
         <p className="text-gray-400 text-sm mb-5">Every prediction save by every player, in order. Admin eyes only.</p>
 
@@ -3625,7 +3657,7 @@ function AuditView({ group }) {
           <select
             value={filterPlayer}
             onChange={(e) => setFilterPlayer(e.target.value)}
-            className="bg-gray-800 border border-gray-700 rounded p-2 text-white text-sm"
+            className="bg-gray-900 border border-gray-800 rounded-xl p-2 text-white text-sm"
           >
             <option value="all">All players</option>
             {players.map((p) => <option key={p} value={p}>{p}</option>)}
@@ -3633,7 +3665,7 @@ function AuditView({ group }) {
           <select
             value={filterRound}
             onChange={(e) => setFilterRound(e.target.value)}
-            className="bg-gray-800 border border-gray-700 rounded p-2 text-white text-sm"
+            className="bg-gray-900 border border-gray-800 rounded-xl p-2 text-white text-sm"
           >
             <option value="all">All rounds</option>
             {rounds.map((r) => <option key={r.round} value={String(r.round)}>R{r.round} — {r.name}</option>)}
@@ -3648,7 +3680,7 @@ function AuditView({ group }) {
         ) : (
           <div className="space-y-2">
             {filtered.map((entry) => (
-              <div key={entry.id} className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+              <div key={entry.id} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
                 {/* Row header */}
                 <button
                   onClick={() => setExpanded(expanded === entry.id ? null : entry.id)}
