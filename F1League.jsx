@@ -152,6 +152,13 @@ function isEditLocked(race) {
   return lockTime ? new Date() >= lockTime : false;
 }
 
+// Returns display name: custom nickname > first letter of email > "?"
+function getDisplayName(nickname, email) {
+  if (nickname && nickname.trim()) return nickname.trim();
+  if (email) return email.charAt(0).toUpperCase();
+  return '?';
+}
+
 // SCHEDULE SYNC — runs on app load, checks Jolpica API against hardcoded schedule
 async function syncScheduleWithAPI() {
   console.log('[Schedule Sync] Starting...');
@@ -202,6 +209,7 @@ export default function F1League() {
   const [pendingInvite, setPendingInvite] = useState(null); // { code, leagueId, leagueName, memberCount }
   const [notifSettings, setNotifSettings] = useState({ pushNotifications: false, reminderMinutesBefore: 30 });
   const [notifStatus, setNotifStatus] = useState('idle'); // 'idle' | 'requesting' | 'granted' | 'denied'
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   // Run schedule sync once on mount
   useEffect(() => { syncScheduleWithAPI(); }, []);
@@ -212,14 +220,20 @@ export default function F1League() {
         setUser(authUser);
         const profileRef = doc(db, "users", authUser.uid);
         const profileDoc = await getDoc(profileRef);
-        if (profileDoc.exists()) {
-          setNickname(profileDoc.data().nickname || "");
-          const saved = profileDoc.data().notificationSettings;
+        if (!profileDoc.exists()) {
+          // New user — create profile and trigger onboarding
+          await setDoc(profileRef, { email: authUser.email, nickname: "", isNewAdmin: true, createdAt: serverTimestamp() });
+          setShowOnboarding(true);
+        } else {
+          const profileData = profileDoc.data();
+          setNickname(profileData.nickname || "");
+          const saved = profileData.notificationSettings;
           if (saved) setNotifSettings(saved);
           // Reflect browser permission state in case it changed outside the app
           if (saved?.pushNotifications && Notification.permission !== 'granted') {
             setNotifSettings(s => ({ ...s, pushNotifications: false }));
           }
+          if (profileData.isNewAdmin) setShowOnboarding(true);
         }
         await loadUserGroups(authUser.uid);
 
@@ -445,20 +459,24 @@ export default function F1League() {
     }
   };
 
+  const completeOnboarding = async (createdGroup) => {
+    try {
+      await setDoc(doc(db, "users", user.uid), { isNewAdmin: false }, { merge: true });
+      await loadUserGroups(user.uid);
+      if (createdGroup) setSelectedGroup(createdGroup);
+    } catch (e) {
+      console.error("Error completing onboarding:", e);
+    } finally {
+      setShowOnboarding(false);
+    }
+  };
+
   if (!user) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-950 via-red-950 to-gray-950 flex items-center justify-center p-4">
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap');`}</style>
-        <div className="text-center max-w-md">
-          <div className="text-6xl font-black mb-4" style={{ fontFamily: "'Orbitron'", color: '#ff0000' }}>F1</div>
-          <h1 className="text-4xl font-bold text-white mb-2" style={{ fontFamily: "'Orbitron'" }}>2026 PREDICTIONS</h1>
-          <p className="text-gray-300 mb-8">Compete with friends. Predict the championship.</p>
-          <button onClick={handleGoogleSignIn} className="w-full bg-white text-gray-900 font-bold py-3 px-6 rounded-lg hover:bg-gray-100 transition">
-            Sign in with Google
-          </button>
-        </div>
-      </div>
-    );
+    return <LandingPage handleGoogleSignIn={handleGoogleSignIn} />;
+  }
+
+  if (showOnboarding) {
+    return <AdminWizard user={user} onComplete={completeOnboarding} />;
   }
 
   if (!selectedGroup) {
@@ -743,6 +761,465 @@ export default function F1League() {
   );
 }
 
+// LANDING PAGE
+function LandingPage({ handleGoogleSignIn }) {
+  const [showSignIn, setShowSignIn] = useState(false);
+  const [rulesTab, setRulesTab] = useState('normal');
+
+  return (
+    <div className="min-h-screen bg-black text-white">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap');
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulseGlow { 0%,100% { box-shadow: 0 0 20px rgba(220,0,0,0.3); } 50% { box-shadow: 0 0 40px rgba(220,0,0,0.7); } }
+        .lp-fade { animation: fadeInUp 0.6s ease both; }
+        .lp-glow { animation: pulseGlow 2s ease-in-out infinite; }
+        .hero-grid { background-image: repeating-linear-gradient(0deg,transparent,transparent 60px,rgba(220,0,0,0.04) 60px,rgba(220,0,0,0.04) 61px),repeating-linear-gradient(90deg,transparent,transparent 60px,rgba(220,0,0,0.04) 60px,rgba(220,0,0,0.04) 61px); }
+      `}</style>
+
+      {/* NAV */}
+      <nav style={{ background: 'rgba(0,0,0,0.96)', borderBottom: '1px solid rgba(220,0,0,0.35)' }} className="sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl font-black" style={{ fontFamily: 'Orbitron', color: '#DC0000' }}>F1</span>
+            <span className="text-xl font-black text-white" style={{ fontFamily: 'Orbitron' }}>KARVAAN</span>
+          </div>
+          <div className="flex items-center gap-4 md:gap-6">
+            <a href="#how-to-play" className="hidden md:block text-gray-400 hover:text-white text-xs font-bold tracking-widest transition">HOW TO PLAY</a>
+            <a href="#rules" className="hidden md:block text-gray-400 hover:text-white text-xs font-bold tracking-widest transition">RULES</a>
+            <button onClick={() => setShowSignIn(true)} className="lp-glow bg-red-600 hover:bg-red-700 text-white font-black px-5 py-2 rounded-full text-sm transition">SIGN IN</button>
+          </div>
+        </div>
+      </nav>
+
+      {/* HERO */}
+      <section className="relative overflow-hidden" style={{ background: 'linear-gradient(135deg,#080808 0%,#1c0000 55%,#080808 100%)', minHeight: '92vh', display: 'flex', alignItems: 'center' }}>
+        <div className="hero-grid absolute inset-0" />
+        <div className="absolute top-0 left-0 right-0 h-0.5 bg-red-600" />
+        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-red-600" />
+        {/* Racing stripe */}
+        <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-transparent via-red-600 to-transparent opacity-60" />
+        <div className="relative max-w-5xl mx-auto px-4 py-24 text-center w-full">
+          <div className="lp-fade" style={{ animationDelay: '0.1s' }}>
+            <span className="inline-block bg-red-600/20 border border-red-600/40 text-red-400 text-xs font-black px-4 py-1.5 rounded-full mb-8 tracking-widest">2026 SEASON</span>
+          </div>
+          <div className="lp-fade" style={{ animationDelay: '0.2s' }}>
+            <h1 className="text-7xl md:text-9xl font-black leading-none mb-0" style={{ fontFamily: 'Orbitron', color: '#DC0000' }}>F1</h1>
+            <h1 className="text-4xl md:text-6xl font-black leading-tight mb-6" style={{ fontFamily: 'Orbitron', color: '#ffffff' }}>KARVAAN</h1>
+          </div>
+          <div className="lp-fade" style={{ animationDelay: '0.35s' }}>
+            <p className="text-lg md:text-2xl font-bold text-gray-300 tracking-widest mb-4">PREDICT. COMPETE. DOMINATE.</p>
+            <p className="text-gray-500 max-w-lg mx-auto mb-10 leading-relaxed text-sm md:text-base">
+              Master the grid. Predict race results before every F1 weekend. Compete with friends and climb the championship leaderboard all season long.
+            </p>
+          </div>
+          <div className="lp-fade flex flex-col sm:flex-row gap-4 justify-center" style={{ animationDelay: '0.5s' }}>
+            <button onClick={() => setShowSignIn(true)} className="lp-glow bg-red-600 hover:bg-red-700 text-white font-black px-10 py-4 rounded-full text-lg transition">
+              🏎️ Start Predicting
+            </button>
+            <a href="#how-to-play" className="border-2 border-white/20 hover:border-red-600/70 text-white font-bold px-10 py-4 rounded-full text-lg transition text-center">
+              Learn More ↓
+            </a>
+          </div>
+          <div className="lp-fade mt-20 grid grid-cols-3 gap-6 max-w-xs mx-auto" style={{ animationDelay: '0.65s' }}>
+            {[['24','RACES'],['22','DRIVERS'],['6','SPRINT WKS']].map(([v,l]) => (
+              <div key={l} className="text-center">
+                <div className="text-2xl font-black" style={{ color: '#DC0000', fontFamily: 'Orbitron' }}>{v}</div>
+                <div className="text-xs text-gray-600 tracking-widest mt-1">{l}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* FEATURES */}
+      <section className="py-20 px-4" style={{ background: '#0c0c0c' }}>
+        <div className="max-w-7xl mx-auto">
+          <h2 className="text-center text-2xl md:text-3xl font-black mb-2" style={{ fontFamily: 'Orbitron' }}>WHY F1 KARVAAN?</h2>
+          <p className="text-center text-gray-600 text-sm mb-14">Everything you need to dominate your league</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {[
+              { icon: '🎯', title: 'PREDICTIONS', desc: 'Predict pole, race results, podiums and sprint positions. Each F1 weekend is a fresh battle of wits.' },
+              { icon: '🏆', title: 'LEADERBOARD', desc: 'Real-time standings after every race. See who predicted right and who bottled it.' },
+              { icon: '⚡', title: 'LIVE UPDATES', desc: 'Points update as races finish. Push notifications and email reminders keep you in the action.' },
+            ].map(f => (
+              <div key={f.title} className="bg-gray-950 border border-gray-800 hover:border-red-600/60 rounded-2xl p-8 transition-all duration-300 hover:-translate-y-1 group">
+                <div className="text-4xl mb-5">{f.icon}</div>
+                <h3 className="font-black text-base mb-3 group-hover:text-red-400 transition-colors" style={{ fontFamily: 'Orbitron' }}>{f.title}</h3>
+                <p className="text-gray-500 text-sm leading-relaxed">{f.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* HOW TO PLAY */}
+      <section id="how-to-play" className="py-20 px-4" style={{ background: '#090909' }}>
+        <div className="max-w-5xl mx-auto">
+          <h2 className="text-center text-2xl md:text-3xl font-black mb-2" style={{ fontFamily: 'Orbitron' }}>HOW TO PLAY</h2>
+          <p className="text-center text-gray-600 text-sm mb-16">Get on the grid in 4 steps</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 relative">
+            <div className="hidden md:block absolute top-10 left-[12%] right-[12%] h-px" style={{ background: 'linear-gradient(90deg, transparent, rgba(220,0,0,0.4), transparent)' }} />
+            {[
+              { n: '01', icon: '🔐', title: 'JOIN', desc: 'Sign in with Google. Create or join a league via invite link.' },
+              { n: '02', icon: '🎯', title: 'PREDICT', desc: 'Before each race weekend, pick pole, podium, and the mystery R# driver.' },
+              { n: '03', icon: '⚔️', title: 'COMPETE', desc: 'Points land as results come in. Track your championship battle live.' },
+              { n: '04', icon: '🥇', title: 'WIN', desc: 'Top the leaderboard at season end. Bragging rights are everything.' },
+            ].map((s, i) => (
+              <div key={s.n} className="text-center">
+                <div className="relative inline-block mb-5">
+                  <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto text-3xl" style={{ background: 'linear-gradient(135deg,#DC0000,#7a0000)', boxShadow: '0 0 24px rgba(220,0,0,0.25)' }}>
+                    {s.icon}
+                  </div>
+                  <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-black border border-red-600 flex items-center justify-center text-xs font-black text-red-500" style={{ fontFamily: 'Orbitron' }}>{i+1}</div>
+                </div>
+                <h3 className="font-black text-sm mb-2" style={{ fontFamily: 'Orbitron', color: '#DC0000' }}>{s.title}</h3>
+                <p className="text-gray-500 text-xs leading-relaxed">{s.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* RULES */}
+      <section id="rules" className="py-20 px-4" style={{ background: '#0c0c0c' }}>
+        <div className="max-w-3xl mx-auto">
+          <h2 className="text-center text-2xl md:text-3xl font-black mb-2" style={{ fontFamily: 'Orbitron' }}>THE RULES</h2>
+          <p className="text-center text-gray-600 text-sm mb-10">Everything you need to know before your first prediction</p>
+          <div className="flex gap-2 mb-8 flex-wrap justify-center">
+            {[['normal','🏁 Normal Race'],['sprint','⚡ Sprint Weekend'],['points','📊 Points System'],['random','🎲 R# Finisher']].map(([t,l]) => (
+              <button key={t} onClick={() => setRulesTab(t)}
+                className={`px-4 py-2 rounded-full text-xs font-bold tracking-wide transition ${rulesTab === t ? 'bg-red-600 text-white' : 'bg-gray-900 text-gray-500 hover:text-white border border-gray-800'}`}>
+                {l}
+              </button>
+            ))}
+          </div>
+          <div className="bg-gray-950 border border-gray-800 rounded-2xl p-8">
+            {rulesTab === 'normal' && (
+              <div>
+                <h3 className="font-black text-base mb-1" style={{ fontFamily: 'Orbitron', color: '#DC0000' }}>Normal Race Weekend</h3>
+                <p className="text-gray-500 text-xs mb-6">Lock: 30 minutes before FP2. Submit 5 predictions:</p>
+                <div className="space-y-2">
+                  {[['Pole Position','Who starts P1 on the grid?','+1'],['Race Winner (P1)','Who takes the chequered flag?','+1'],['2nd Place (P2)','2nd on the podium','+1'],['3rd Place (P3)','3rd on the podium','+1'],['R# Random Finisher','Mystery wildcard (see R# tab)','+1 or +2']].map(([n,d,p]) => (
+                    <div key={n} className="flex items-center gap-4 bg-gray-900 rounded-xl p-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-white text-sm">{n}</p>
+                        <p className="text-gray-600 text-xs mt-0.5">{d}</p>
+                      </div>
+                      <span className="text-yellow-400 font-black text-sm shrink-0">{p}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {rulesTab === 'sprint' && (
+              <div>
+                <h3 className="font-black text-base mb-1" style={{ fontFamily: 'Orbitron', color: '#DC0000' }}>Sprint Race Weekend</h3>
+                <p className="text-gray-500 text-xs mb-6">Lock: 30 minutes before Sprint Qualifying. Submit 9 predictions:</p>
+                <div className="space-y-2">
+                  {[['Pole Position','Grand Prix qualifying pole','+1'],['Sprint Quali Pole','Sprint shootout top spot','+1'],['Sprint P1','Sprint race winner','+1'],['Sprint P2 / P3','Sprint podium positions','+1 each'],['Race P1 / P2 / P3','Grand Prix podium','+1 each'],['R# Random Finisher','Mystery wildcard','+1 or +2']].map(([n,d,p]) => (
+                    <div key={n} className="flex items-center gap-4 bg-gray-900 rounded-xl p-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-white text-sm">{n}</p>
+                        <p className="text-gray-600 text-xs mt-0.5">{d}</p>
+                      </div>
+                      <span className="text-yellow-400 font-black text-sm shrink-0">{p}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {rulesTab === 'points' && (
+              <div>
+                <h3 className="font-black text-base mb-2" style={{ fontFamily: 'Orbitron', color: '#DC0000' }}>Points System</h3>
+                <div className="overflow-hidden rounded-xl border border-gray-800">
+                  <table className="w-full text-sm">
+                    <thead><tr className="bg-gray-900"><th className="text-left p-3 text-gray-500 font-semibold text-xs">Prediction</th><th className="text-left p-3 text-gray-500 font-semibold text-xs">Weekend</th><th className="text-center p-3 text-gray-500 font-semibold text-xs">Pts</th></tr></thead>
+                    <tbody className="divide-y divide-gray-900">
+                      <tr><td className="p-3 text-gray-300 text-sm">Pole Position</td><td className="p-3 text-gray-600 text-xs">Both</td><td className="p-3 text-center text-yellow-400 font-black">+1</td></tr>
+                      <tr><td className="p-3 text-gray-300 text-sm">Sprint Quali Pole</td><td className="p-3 text-gray-600 text-xs">Sprint</td><td className="p-3 text-center text-yellow-400 font-black">+1</td></tr>
+                      <tr><td className="p-3 text-gray-300 text-sm">Sprint P1 / P2 / P3</td><td className="p-3 text-gray-600 text-xs">Sprint</td><td className="p-3 text-center text-yellow-400 font-black">+1 ea</td></tr>
+                      <tr><td className="p-3 text-gray-300 text-sm">Race P1 / P2 / P3</td><td className="p-3 text-gray-600 text-xs">Both</td><td className="p-3 text-center text-yellow-400 font-black">+1 ea</td></tr>
+                      <tr className="bg-gray-900/60"><td className="p-3 text-gray-300 text-sm">R# Exact Match</td><td className="p-3 text-gray-600 text-xs">Both</td><td className="p-3 text-center text-green-400 font-black">+2</td></tr>
+                      <tr className="bg-gray-900/60"><td className="p-3 text-gray-300 text-sm">R# Closest Prediction</td><td className="p-3 text-gray-600 text-xs">Both</td><td className="p-3 text-center text-green-400 font-black">+1</td></tr>
+                      <tr className="bg-red-900/10"><td className="p-3 text-gray-300 text-sm font-bold">Max — Normal Race</td><td className="p-3 text-gray-600 text-xs">—</td><td className="p-3 text-center text-red-400 font-black">6</td></tr>
+                      <tr className="bg-red-900/10"><td className="p-3 text-gray-300 text-sm font-bold">Max — Sprint Weekend</td><td className="p-3 text-gray-600 text-xs">—</td><td className="p-3 text-center text-red-400 font-black">10</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            {rulesTab === 'random' && (
+              <div>
+                <h3 className="font-black text-base mb-2" style={{ fontFamily: 'Orbitron', color: '#DC0000' }}>R# — The Random Finisher</h3>
+                <p className="text-gray-500 text-xs mb-6">The wildcard that keeps every race unpredictable.</p>
+                <div className="space-y-3">
+                  {[
+                    ['🎲','border-yellow-500','A secret number is drawn','Before the race, a random finishing position (e.g. position 7) is generated. This is the R# target.'],
+                    ['🏎️','border-blue-500','You pick a driver','Choose any driver on the grid — who do you think will finish closest to that secret position?'],
+                    ['📐','border-green-500','Distance scoring','After the race: |your driver\'s position − R# target| = distance. Closest distance wins +1. Exact match = +2.'],
+                    ['⚠️','border-red-500','Ties','Equal distance = both players get +1. Only one +2 (exact match) is possible per round.'],
+                  ].map(([icon, border, title, desc]) => (
+                    <div key={title} className={`bg-gray-900 rounded-xl p-4 border-l-4 ${border}`}>
+                      <p className="text-white font-bold text-sm mb-1">{icon} {title}</p>
+                      <p className="text-gray-500 text-xs leading-relaxed">{desc}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* CTA */}
+      <section className="py-24 px-4 text-center" style={{ background: 'linear-gradient(135deg,#150000,#080808)' }}>
+        <div className="max-w-2xl mx-auto">
+          <h2 className="text-4xl md:text-6xl font-black mb-3" style={{ fontFamily: 'Orbitron' }}>LIGHTS OUT.</h2>
+          <h2 className="text-4xl md:text-6xl font-black mb-8" style={{ fontFamily: 'Orbitron', color: '#DC0000' }}>AND AWAY WE GO.</h2>
+          <p className="text-gray-500 mb-10 text-sm">Join your friends. Make your predictions. Claim the title.</p>
+          <button onClick={() => setShowSignIn(true)} className="lp-glow bg-red-600 hover:bg-red-700 text-white font-black px-12 py-5 rounded-full text-xl transition">
+            🏎️ Join Now — It's Free
+          </button>
+        </div>
+      </section>
+
+      {/* FOOTER */}
+      <footer className="border-t py-8 px-4" style={{ background: '#050505', borderColor: '#111' }}>
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-2">
+            <span className="font-black" style={{ fontFamily: 'Orbitron', color: '#DC0000' }}>F1</span>
+            <span className="font-black text-white" style={{ fontFamily: 'Orbitron' }}>KARVAAN</span>
+          </div>
+          <p className="text-gray-700 text-xs">© 2026 F1 Karvaan · Not affiliated with Formula 1 or FOM</p>
+          <button onClick={() => setShowSignIn(true)} className="text-red-600 hover:text-red-400 text-sm font-bold transition">Sign In →</button>
+        </div>
+      </footer>
+
+      {/* SIGN IN MODAL */}
+      {showSignIn && (
+        <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50" onClick={e => e.target === e.currentTarget && setShowSignIn(false)}>
+          <div className="bg-gray-950 border-2 border-red-600 rounded-2xl p-8 w-full max-w-sm text-center">
+            <div className="text-5xl font-black mb-1" style={{ fontFamily: 'Orbitron', color: '#DC0000' }}>F1</div>
+            <div className="text-2xl font-black text-white mb-1" style={{ fontFamily: 'Orbitron' }}>KARVAAN</div>
+            <p className="text-gray-500 text-xs mb-8">Sign in to start predicting</p>
+            <button
+              onClick={() => { setShowSignIn(false); handleGoogleSignIn(); }}
+              className="w-full bg-white hover:bg-gray-100 text-gray-900 font-bold py-3.5 px-6 rounded-xl flex items-center justify-center gap-3 transition text-sm"
+            >
+              <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z"/></svg>
+              Continue with Google
+            </button>
+            <p className="text-gray-700 text-xs mt-6">By signing in you agree to play by the rules.</p>
+            <button onClick={() => setShowSignIn(false)} className="mt-3 text-gray-600 hover:text-gray-400 text-xs transition">← Back</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ADMIN SETUP WIZARD
+function AdminWizard({ user, onComplete }) {
+  const [step, setStep] = useState(1);
+  const [leagueName, setLeagueName] = useState("");
+  const [createdGroup, setCreatedGroup] = useState(null);
+  const [inviteLink, setInviteLink] = useState("");
+  const [inviteCopied, setInviteCopied] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const createLeague = async () => {
+    if (!leagueName.trim() || loading) return;
+    setLoading(true);
+    try {
+      const groupId = `group_${Date.now()}`;
+      await setDoc(doc(db, "groups", groupId), {
+        name: leagueName.trim(),
+        admin: user.uid,
+        members: [user.uid],
+        createdTimestamp: serverTimestamp(),
+      });
+      const group = { id: groupId, name: leagueName.trim(), admin: user.uid, members: [user.uid] };
+      setCreatedGroup(group);
+      setStep(3);
+    } catch (e) {
+      console.error("Wizard league error:", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const generateWizardInvite = async () => {
+    if (!createdGroup || loading) return;
+    setLoading(true);
+    try {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let code = '';
+      for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
+      await setDoc(doc(db, "invites", code), {
+        leagueId: createdGroup.id,
+        createdBy: user.uid,
+        createdAt: serverTimestamp(),
+        usedCount: 0,
+      });
+      setInviteLink(`${window.location.origin}?invite=${code}`);
+    } catch (e) {
+      console.error("Wizard invite error:", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const copyInvite = () => {
+    navigator.clipboard.writeText(inviteLink);
+    setInviteCopied(true);
+    setTimeout(() => setInviteCopied(false), 2000);
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'linear-gradient(135deg,#0a0a0a,#1a0000,#0a0a0a)' }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap');`}</style>
+      <div className="w-full max-w-md">
+        {/* Logo */}
+        <div className="text-center mb-8">
+          <span className="text-4xl font-black" style={{ fontFamily: 'Orbitron', color: '#DC0000' }}>F1 </span>
+          <span className="text-3xl font-black text-white" style={{ fontFamily: 'Orbitron' }}>KARVAAN</span>
+          <p className="text-gray-600 text-xs mt-2 tracking-widest">ADMIN SETUP</p>
+        </div>
+
+        {/* Progress bar */}
+        <div className="flex gap-1.5 mb-8">
+          {[1,2,3,4].map(s => (
+            <div key={s} className="flex-1 h-1 rounded-full transition-colors duration-300" style={{ background: s <= step ? '#DC0000' : '#1f1f1f' }} />
+          ))}
+        </div>
+
+        <div className="bg-gray-950 border border-red-900/30 rounded-2xl p-8 text-white">
+
+          {/* Step 1: Welcome */}
+          {step === 1 && (
+            <div className="text-center">
+              <div className="text-5xl mb-5">🏎️</div>
+              <h2 className="text-xl font-black mb-2" style={{ fontFamily: 'Orbitron' }}>WELCOME ABOARD</h2>
+              <p className="text-red-400 font-bold text-sm mb-6 tracking-wider">{(user.email || '').split('@')[0].toUpperCase()}</p>
+              <p className="text-gray-500 text-sm mb-8 leading-relaxed">
+                You're setting up <strong className="text-white">F1 Karvaan</strong>. As admin you'll create the league, manage players, enter race results, and keep track of predictions.
+              </p>
+              <div className="space-y-2 text-left mb-8">
+                {['Create and name your private league','Invite friends via a unique link','Enter race results each weekend','Track all predictions on the audit log'].map(f => (
+                  <div key={f} className="flex items-center gap-3 text-sm">
+                    <span className="text-red-500 text-xs">▶</span>
+                    <span className="text-gray-400">{f}</span>
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => setStep(2)} className="w-full font-black py-3.5 rounded-xl text-white transition" style={{ background: '#DC0000' }}>
+                LET'S GO →
+              </button>
+            </div>
+          )}
+
+          {/* Step 2: Create League */}
+          {step === 2 && (
+            <div>
+              <div className="text-4xl text-center mb-4">🏁</div>
+              <h2 className="text-lg font-black text-center mb-1" style={{ fontFamily: 'Orbitron' }}>CREATE YOUR LEAGUE</h2>
+              <p className="text-gray-500 text-xs text-center mb-8">Give your league a name. You can rename it later.</p>
+              <label className="block text-xs font-bold text-gray-600 mb-2 tracking-widest">LEAGUE NAME</label>
+              <input
+                type="text"
+                placeholder="e.g. Karvaan F1 2026"
+                value={leagueName}
+                onChange={e => setLeagueName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && createLeague()}
+                className="w-full bg-gray-900 border-2 border-gray-800 focus:border-red-600 rounded-xl p-4 text-white text-base outline-none transition mb-6"
+                autoFocus
+              />
+              <div className="flex gap-3">
+                <button onClick={() => setStep(1)} className="px-4 py-3 bg-gray-900 hover:bg-gray-800 text-gray-500 font-bold rounded-xl transition">←</button>
+                <button onClick={createLeague} disabled={!leagueName.trim() || loading}
+                  className="flex-1 font-black py-3 rounded-xl text-white transition disabled:opacity-40" style={{ background: '#DC0000' }}>
+                  {loading ? 'Creating...' : 'CREATE LEAGUE →'}
+                </button>
+              </div>
+              <button onClick={() => setStep(3)} className="w-full mt-3 text-gray-700 hover:text-gray-500 text-xs py-2 transition">Skip for now</button>
+            </div>
+          )}
+
+          {/* Step 3: Invite */}
+          {step === 3 && (
+            <div>
+              <div className="text-4xl text-center mb-4">📨</div>
+              <h2 className="text-lg font-black text-center mb-1" style={{ fontFamily: 'Orbitron' }}>INVITE YOUR CREW</h2>
+              {createdGroup
+                ? <p className="text-gray-500 text-xs text-center mb-6">League <strong className="text-white">{createdGroup.name}</strong> is live. Share the link below:</p>
+                : <p className="text-gray-500 text-xs text-center mb-6">Create a league first, then generate your invite link from the Invites tab.</p>
+              }
+              {createdGroup && (
+                inviteLink ? (
+                  <div className="space-y-3 mb-6">
+                    <div className="flex gap-2">
+                      <input value={inviteLink} readOnly className="flex-1 bg-gray-900 border border-gray-800 rounded-xl p-3 text-white text-xs font-mono outline-none" />
+                      <button onClick={copyInvite} className="bg-gray-800 hover:bg-gray-700 px-4 rounded-xl transition text-white">
+                        {inviteCopied ? '✓' : <Copy size={16} />}
+                      </button>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => { const t = encodeURIComponent(`Join my F1 2026 Predictions League — ${createdGroup.name}!\n${inviteLink}`); window.open(`https://wa.me/?text=${t}`, '_blank'); }} className="flex-1 text-white text-xs font-bold py-2.5 rounded-xl transition" style={{ background: '#25d366' }}>WhatsApp</button>
+                      <button onClick={() => { const b = encodeURIComponent(`Join ${createdGroup.name}: ${inviteLink}`); window.open(`mailto:?subject=${encodeURIComponent(`Join ${createdGroup.name}`)}&body=${b}`, '_blank'); }} className="flex-1 bg-blue-700 hover:bg-blue-600 text-white text-xs font-bold py-2.5 rounded-xl transition">Email</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={generateWizardInvite} disabled={loading}
+                    className="w-full bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 rounded-xl transition mb-6 text-sm">
+                    {loading ? 'Generating...' : '🔗 Generate Invite Link'}
+                  </button>
+                )
+              )}
+              <div className="flex gap-3">
+                <button onClick={() => setStep(2)} className="px-4 py-3 bg-gray-900 hover:bg-gray-800 text-gray-500 font-bold rounded-xl transition">←</button>
+                <button onClick={() => setStep(4)} className="flex-1 font-black py-3 rounded-xl text-white transition" style={{ background: '#DC0000' }}>
+                  {inviteLink ? 'DONE →' : 'SKIP →'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 4: Complete */}
+          {step === 4 && (
+            <div className="text-center">
+              <div className="text-5xl mb-4">🏆</div>
+              <h2 className="text-xl font-black mb-3" style={{ fontFamily: 'Orbitron' }}>YOU'RE ON THE GRID!</h2>
+              <p className="text-gray-500 text-xs mb-8 leading-relaxed">
+                {createdGroup
+                  ? <>League <strong className="text-white">{createdGroup.name}</strong> is ready. R1 Australia kicks off on <strong className="text-red-400">8 Mar 2026</strong>.</>
+                  : 'Head to the dashboard to create your first league and invite players.'}
+              </p>
+              <div className="space-y-2 text-left mb-8">
+                {[
+                  ['✅', 'Account created'],
+                  [createdGroup ? '✅' : '⬜', createdGroup ? `League "${createdGroup.name}" created` : 'Create a league from the dashboard'],
+                  [inviteLink ? '✅' : '⬜', inviteLink ? 'Invite link sent' : 'Generate an invite from the Invites tab'],
+                  ['⬜', 'Enter results after R1 — Australia (8 Mar)'],
+                ].map(([icon, text]) => (
+                  <div key={text} className="flex items-center gap-3 bg-gray-900 p-3 rounded-lg text-xs">
+                    <span>{icon}</span>
+                    <span className="text-gray-400">{text}</span>
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => onComplete(createdGroup)} className="w-full font-black py-4 rounded-xl text-white text-lg transition" style={{ background: '#DC0000' }}>
+                GO TO DASHBOARD 🏎️
+              </button>
+            </div>
+          )}
+        </div>
+        <p className="text-center text-gray-800 text-xs mt-5">Step {step} of 4</p>
+      </div>
+    </div>
+  );
+}
+
 // LEADERBOARD VIEW
 function LeaderboardView({ group, currentRound }) {
   const [leaderboard, setLeaderboard] = useState([]);
@@ -755,7 +1232,7 @@ function LeaderboardView({ group, currentRound }) {
         const leaderboardData = await Promise.all(snapshot.docs.map(async (scoreDoc) => {
           const userRef = doc(db, "users", scoreDoc.id);
           const userDoc = await getDoc(userRef);
-          const nickname = userDoc.data()?.nickname || "Unknown";
+          const nickname = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.email);
           let totalPoints = 0;
           for (let i = 1; i <= currentRound; i++) {
             totalPoints += scoreDoc.data()[`round${i}`]?.totalPoints || 0;
@@ -829,7 +1306,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
           try {
             const userRef = doc(db, "users", memberId);
             const userDoc = await getDoc(userRef);
-            nicknames[memberId] = userDoc.data()?.nickname || "Unknown";
+            nicknames[memberId] = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.email);
           } catch (e) {
             nicknames[memberId] = "Unknown";
           }
@@ -936,7 +1413,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
       const randomRef = doc(db, `groups/${group.id}/randomNumbers`, `round${currentRound}`);
       const userRef = doc(db, "users", user.uid);
       const userDoc = await getDoc(userRef);
-      const nickname = userDoc.data()?.nickname || "Unknown";
+      const nickname = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.email);
 
       await setDoc(randomRef, {
         number: num,
@@ -963,7 +1440,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
 
       const userRef = doc(db, "users", user.uid);
       const userDoc = await getDoc(userRef);
-      const userNickname = userDoc.data()?.nickname || "Unknown";
+      const userNickname = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.email);
 
       const predRef = doc(db, `groups/${group.id}/predictions`, user.uid);
       await setDoc(predRef, {
@@ -1361,7 +1838,7 @@ function SeasonBoardView({ group, user }) {
           try {
             const userRef = doc(db, "users", memberId);
             const userDoc = await getDoc(userRef);
-            nicknames[memberId] = userDoc.data()?.nickname || "Unknown";
+            nicknames[memberId] = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.email);
           } catch (e) {
             nicknames[memberId] = "Unknown";
           }
@@ -1407,7 +1884,7 @@ function SeasonBoardView({ group, user }) {
     try {
       const userRef = doc(db, "users", user.uid);
       const userDoc = await getDoc(userRef);
-      const userNickname = userDoc.data()?.nickname || "Unknown";
+      const userNickname = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.email);
 
       const predRef = doc(db, `groups/${group.id}/seasonPredictions`, user.uid);
       await setDoc(predRef, {
@@ -2393,7 +2870,7 @@ function InvitesView({ group, user, generateInviteCode, inviteLink, inviteStats,
         for (const memberId of group.members) {
           const userRef = doc(db, "users", memberId);
           const userDoc = await getDoc(userRef);
-          nicknames[memberId] = userDoc.data()?.nickname || "Unknown";
+          nicknames[memberId] = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.email);
         }
         setMemberNicknames(nicknames);
       } catch (error) {
@@ -2548,8 +3025,8 @@ function CalendarView({ group, user, currentRound }) {
         await Promise.all((group.members || []).map(async memberId => {
           try {
             const ud = await getDoc(doc(db, "users", memberId));
-            nicknames[memberId] = ud.data()?.nickname || "Unknown";
-          } catch { nicknames[memberId] = "Unknown"; }
+            nicknames[memberId] = getDisplayName(ud.data()?.nickname, ud.data()?.email);
+          } catch { nicknames[memberId] = '?'; }
         }));
         setMemberNicknames(nicknames);
       } catch (e) {
