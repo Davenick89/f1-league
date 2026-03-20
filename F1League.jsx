@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayRemove, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { Menu, X, LogOut, Plus, Users, Trophy, BarChart3, Settings, Copy, Check, Calendar, Lock, Edit } from 'lucide-react';
 
 const firebaseConfig = {
@@ -17,6 +18,22 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 setPersistence(auth, browserLocalPersistence).catch(e => console.error("Auth error:", e));
 const db = getFirestore(app);
+
+// FCM — only initialised in browsers that support service workers + notifications
+let messaging = null;
+try {
+  if ('serviceWorker' in navigator && 'Notification' in window) {
+    messaging = getMessaging(app);
+    // Show in-app notification toasts for foreground messages
+    onMessage(messaging, (payload) => {
+      const { title, body } = payload.notification ?? {};
+      if (title) console.info(`[FCM] ${title}: ${body}`);
+      // Foreground toast is handled in the Settings UI via a state update
+    });
+  }
+} catch (e) {
+  console.info('[FCM] Not supported in this browser:', e.message);
+}
 
 const F1_SCHEDULE_2026 = [
   { round: 1,  name: "Australia",          location: "Melbourne",    date: "2026-03-08", fp1: "2026-03-06T09:30:00Z", fp2: "2026-03-06T13:00:00Z",                                       raceStart: "2026-03-08T04:00:00Z", isSprint: false },
@@ -178,6 +195,8 @@ export default function F1League() {
   const [renameValue, setRenameValue] = useState("");
   const [inviteLink, setInviteLink] = useState("");
   const [copiedLink, setCopiedLink] = useState(false);
+  const [notifSettings, setNotifSettings] = useState({ pushNotifications: false, reminderMinutesBefore: 30 });
+  const [notifStatus, setNotifStatus] = useState('idle'); // 'idle' | 'requesting' | 'granted' | 'denied'
 
   // Run schedule sync once on mount
   useEffect(() => { syncScheduleWithAPI(); }, []);
@@ -190,6 +209,12 @@ export default function F1League() {
         const profileDoc = await getDoc(profileRef);
         if (profileDoc.exists()) {
           setNickname(profileDoc.data().nickname || "");
+          const saved = profileDoc.data().notificationSettings;
+          if (saved) setNotifSettings(saved);
+          // Reflect browser permission state in case it changed outside the app
+          if (saved?.pushNotifications && Notification.permission !== 'granted') {
+            setNotifSettings(s => ({ ...s, pushNotifications: false }));
+          }
         }
         await loadUserGroups(authUser.uid);
 
@@ -261,6 +286,46 @@ export default function F1League() {
     } catch (error) {
       console.error("Error saving nickname:", error);
     }
+  };
+
+  const enablePushNotifications = async () => {
+    if (!messaging || !user) return;
+    setNotifStatus('requesting');
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        setNotifStatus('denied');
+        return;
+      }
+      // Register the service worker first so FCM can use it
+      const swReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+      const token = await getToken(messaging, {
+        vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY,
+        serviceWorkerRegistration: swReg,
+      });
+      const newSettings = { ...notifSettings, pushNotifications: true };
+      await setDoc(doc(db, "users", user.uid), { fcmToken: token, notificationSettings: newSettings }, { merge: true });
+      setNotifSettings(newSettings);
+      setNotifStatus('granted');
+    } catch (err) {
+      console.error('[FCM] Token registration failed:', err);
+      setNotifStatus('denied');
+    }
+  };
+
+  const disablePushNotifications = async () => {
+    if (!user) return;
+    const newSettings = { ...notifSettings, pushNotifications: false };
+    await setDoc(doc(db, "users", user.uid), { fcmToken: null, notificationSettings: newSettings }, { merge: true });
+    setNotifSettings(newSettings);
+    setNotifStatus('idle');
+  };
+
+  const saveReminderTime = async (minutes) => {
+    if (!user) return;
+    const newSettings = { ...notifSettings, reminderMinutesBefore: minutes };
+    await setDoc(doc(db, "users", user.uid), { notificationSettings: newSettings }, { merge: true });
+    setNotifSettings(newSettings);
   };
 
   const createNewGroup = async () => {
@@ -383,13 +448,64 @@ export default function F1League() {
 
           {showSettings && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-              <div className="bg-gray-900 border-2 border-red-600 rounded-lg p-6 w-full max-w-md">
-                <h2 className="text-2xl font-bold text-white mb-4">Settings</h2>
-                <input type="text" placeholder="Enter your nickname" value={nickname} onChange={(e) => setNickname(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded p-3 text-white mb-4 focus:outline-none focus:border-red-600" />
-                <div className="flex gap-2">
-                  <button onClick={saveNickname} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded">Save</button>
-                  <button onClick={() => setShowSettings(false)} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 rounded">Cancel</button>
+              <div className="bg-gray-900 border-2 border-red-600 rounded-lg p-6 w-full max-w-md space-y-6">
+                <h2 className="text-2xl font-bold text-white" style={{ fontFamily: "'Orbitron'" }}>SETTINGS</h2>
+
+                {/* Nickname */}
+                <div>
+                  <label className="block text-sm font-bold text-gray-400 mb-2">Nickname</label>
+                  <input type="text" placeholder="Enter your nickname" value={nickname} onChange={(e) => setNickname(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded p-3 text-white focus:outline-none focus:border-red-600" />
+                  <button onClick={saveNickname} className="mt-2 w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded">Save Nickname</button>
                 </div>
+
+                {/* Push Notifications */}
+                <div className="border-t border-gray-700 pt-5">
+                  <p className="text-sm font-bold text-gray-400 mb-3">PUSH NOTIFICATIONS</p>
+                  {!messaging ? (
+                    <p className="text-xs text-gray-500">Not supported in this browser.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-white font-semibold">Prediction Reminders</p>
+                          <p className="text-xs text-gray-500 mt-0.5">Get notified before predictions close</p>
+                        </div>
+                        <button
+                          onClick={notifSettings.pushNotifications ? disablePushNotifications : enablePushNotifications}
+                          disabled={notifStatus === 'requesting'}
+                          className={`relative w-12 h-6 rounded-full transition-colors ${notifSettings.pushNotifications ? 'bg-red-600' : 'bg-gray-600'} disabled:opacity-50`}
+                        >
+                          <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${notifSettings.pushNotifications ? 'left-6' : 'left-0.5'}`} />
+                        </button>
+                      </div>
+
+                      {notifStatus === 'denied' && (
+                        <p className="text-xs text-red-400">Permission denied. Enable notifications in your browser settings, then try again.</p>
+                      )}
+                      {notifStatus === 'requesting' && (
+                        <p className="text-xs text-yellow-400">Requesting permission...</p>
+                      )}
+
+                      {notifSettings.pushNotifications && (
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Remind me</label>
+                          <select
+                            value={notifSettings.reminderMinutesBefore}
+                            onChange={(e) => saveReminderTime(Number(e.target.value))}
+                            className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-white text-sm"
+                          >
+                            <option value={15}>15 minutes before close</option>
+                            <option value={20}>20 minutes before close</option>
+                            <option value={30}>30 minutes before close</option>
+                            <option value={45}>45 minutes before close</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <button onClick={() => setShowSettings(false)} className="w-full bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 rounded">Close</button>
               </div>
             </div>
           )}
