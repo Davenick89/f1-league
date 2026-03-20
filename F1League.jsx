@@ -1457,7 +1457,7 @@ function PlayerSummaryModal({ group, playerId, playerName, currentRound, onClose
         const rounds = [];
         let totalPts = 0, totalCorrect = 0, totalPreds = 0;
 
-        for (let r = 1; r < currentRound; r++) {
+        for (let r = 1; r <= currentRound; r++) {
           const roundScore = scoresData[`round${r}`];
           const roundPred = predsData[`round${r}`];
           const race = F1_SCHEDULE_2026[r - 1];
@@ -1592,18 +1592,18 @@ function LeaderboardView({ group, currentRound, user }) {
         ) : (
           <div className="space-y-2">
             {leaderboard.map((entry, index) => (
-              <div key={entry.userId} className={`rounded-xl p-4 flex items-center justify-between transition ${index === 0 ? 'bg-gradient-to-r from-yellow-900/30 to-gray-900 border border-yellow-600/30' : 'bg-gray-900 hover:bg-gray-800'}`}>
+              <button key={entry.userId} onClick={() => setSelectedPlayer({ id: entry.userId, name: entry.nickname })} className={`w-full rounded-xl p-4 flex items-center justify-between transition cursor-pointer ${index === 0 ? 'bg-gradient-to-r from-yellow-900/30 to-gray-900 border border-yellow-600/30 hover:from-yellow-900/40' : 'bg-gray-900 hover:bg-gray-800'}`}>
                 <div className="flex items-center gap-3">
                   <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg font-black shrink-0 ${index === 0 ? 'bg-yellow-600/20' : index === 1 ? 'bg-gray-600/20' : index === 2 ? 'bg-orange-700/20' : 'bg-gray-800'}`}>
                     {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : <span className="text-sm text-gray-500">{index + 1}</span>}
                   </div>
-                  <button onClick={() => setSelectedPlayer({ id: entry.userId, name: entry.nickname })} className="font-bold text-white text-sm hover:text-red-400 transition text-left">{entry.nickname}</button>
+                  <span className="font-bold text-white text-sm text-left">{entry.nickname}</span>
                 </div>
                 <div className="text-right">
                   <p className="text-2xl font-black" style={{ color: index === 0 ? '#FFD700' : '#DC0000' }}>{entry.totalPoints}</p>
                   <p className="text-xs text-gray-600 tracking-widest">PTS</p>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
