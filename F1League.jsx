@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayRemove, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { Menu, X, LogOut, Plus, Users, Trophy, BarChart3, Settings, Copy, Check, Calendar, Lock, Edit } from 'lucide-react';
 
 const firebaseConfig = {
@@ -19,30 +19,30 @@ setPersistence(auth, browserLocalPersistence).catch(e => console.error("Auth err
 const db = getFirestore(app);
 
 const F1_SCHEDULE_2026 = [
-  { round: 1, name: "Australia", location: "Melbourne", date: "2026-03-08", fp1: "2026-03-06T09:30:00", raceStart: "2026-03-08T04:00:00Z", isSprint: false },
-  { round: 2, name: "China", location: "Shanghai", date: "2026-03-15", fp1: "2026-03-13T10:00:00", raceStart: "2026-03-15T07:00:00Z", isSprint: true },
-  { round: 3, name: "Japan", location: "Suzuka", date: "2026-03-29", fp1: "2026-03-27T10:00:00", raceStart: "2026-03-29T05:00:00Z", isSprint: false },
-  { round: 4, name: "Bahrain", location: "Sakhir", date: "2026-04-12", fp1: "2026-04-10T14:00:00", raceStart: "2026-04-12T15:00:00Z", isSprint: false },
-  { round: 5, name: "Saudi Arabia", location: "Jeddah", date: "2026-04-19", fp1: "2026-04-17T17:00:00", raceStart: "2026-04-19T17:00:00Z", isSprint: false },
-  { round: 6, name: "Miami", location: "Miami", date: "2026-05-03", fp1: "2026-05-01T13:00:00", raceStart: "2026-05-03T19:30:00Z", isSprint: true },
-  { round: 7, name: "Canada", location: "Montreal", date: "2026-05-24", fp1: "2026-05-22T14:00:00", raceStart: "2026-05-24T18:00:00Z", isSprint: true },
-  { round: 8, name: "Monaco", location: "Monte Carlo", date: "2026-06-07", fp1: "2026-06-05T14:00:00", raceStart: "2026-06-07T13:00:00Z", isSprint: false },
-  { round: 9, name: "Barcelona-Catalunya", location: "Barcelona", date: "2026-06-14", fp1: "2026-06-12T13:00:00", raceStart: "2026-06-14T13:00:00Z", isSprint: false },
-  { round: 10, name: "Austria", location: "Spielberg", date: "2026-06-28", fp1: "2026-06-26T14:00:00", raceStart: "2026-06-28T13:00:00Z", isSprint: false },
-  { round: 11, name: "Great Britain", location: "Silverstone", date: "2026-07-05", fp1: "2026-07-03T13:00:00", raceStart: "2026-07-05T14:00:00Z", isSprint: true },
-  { round: 12, name: "Belgium", location: "Spa", date: "2026-07-19", fp1: "2026-07-17T14:00:00", raceStart: "2026-07-19T13:00:00Z", isSprint: false },
-  { round: 13, name: "Hungary", location: "Budapest", date: "2026-07-26", fp1: "2026-07-24T14:00:00", raceStart: "2026-07-26T13:00:00Z", isSprint: false },
-  { round: 14, name: "Netherlands", location: "Zandvoort", date: "2026-08-23", fp1: "2026-08-21T14:00:00", raceStart: "2026-08-23T13:00:00Z", isSprint: true },
-  { round: 15, name: "Italy", location: "Monza", date: "2026-09-06", fp1: "2026-09-04T13:00:00", raceStart: "2026-09-06T13:00:00Z", isSprint: false },
-  { round: 16, name: "Spain", location: "Madrid", date: "2026-09-13", fp1: "2026-09-11T14:00:00", raceStart: "2026-09-13T13:00:00Z", isSprint: false },
-  { round: 17, name: "Azerbaijan", location: "Baku", date: "2026-09-27", fp1: "2026-09-25T12:00:00", raceStart: "2026-09-27T11:00:00Z", isSprint: false },
-  { round: 18, name: "Singapore", location: "Singapore", date: "2026-10-11", fp1: "2026-10-09T14:00:00", raceStart: "2026-10-11T12:00:00Z", isSprint: true },
-  { round: 19, name: "United States", location: "Austin", date: "2026-10-25", fp1: "2026-10-23T12:00:00", raceStart: "2026-10-25T19:00:00Z", isSprint: false },
-  { round: 20, name: "Mexico", location: "Mexico City", date: "2026-11-01", fp1: "2026-10-30T18:00:00", raceStart: "2026-11-01T20:00:00Z", isSprint: false },
-  { round: 21, name: "Brazil", location: "São Paulo", date: "2026-11-08", fp1: "2026-11-06T11:00:00", raceStart: "2026-11-08T17:00:00Z", isSprint: false },
-  { round: 22, name: "Las Vegas", location: "Las Vegas", date: "2026-11-21", fp1: "2026-11-19T22:00:00", raceStart: "2026-11-22T06:00:00Z", isSprint: false },
-  { round: 23, name: "Qatar", location: "Lusail", date: "2026-11-29", fp1: "2026-11-27T15:00:00", raceStart: "2026-11-29T16:00:00Z", isSprint: false },
-  { round: 24, name: "Abu Dhabi", location: "Yas Island", date: "2026-12-06", fp1: "2026-12-04T08:00:00", raceStart: "2026-12-06T13:00:00Z", isSprint: false },
+  { round: 1,  name: "Australia",          location: "Melbourne",    date: "2026-03-08", fp1: "2026-03-06T09:30:00Z", fp2: "2026-03-06T13:00:00Z",                                       raceStart: "2026-03-08T04:00:00Z", isSprint: false },
+  { round: 2,  name: "China",              location: "Shanghai",     date: "2026-03-15", fp1: "2026-03-13T10:00:00Z", sprintQualStart: "2026-03-13T13:30:00Z",                            raceStart: "2026-03-15T07:00:00Z", isSprint: true  },
+  { round: 3,  name: "Japan",              location: "Suzuka",       date: "2026-03-29", fp1: "2026-03-27T10:00:00Z", fp2: "2026-03-27T13:30:00Z",                                       raceStart: "2026-03-29T05:00:00Z", isSprint: false },
+  { round: 4,  name: "Bahrain",            location: "Sakhir",       date: "2026-04-12", fp1: "2026-04-10T14:00:00Z", fp2: "2026-04-10T17:30:00Z",                                       raceStart: "2026-04-12T15:00:00Z", isSprint: false },
+  { round: 5,  name: "Saudi Arabia",       location: "Jeddah",       date: "2026-04-19", fp1: "2026-04-17T17:00:00Z", fp2: "2026-04-17T20:30:00Z",                                       raceStart: "2026-04-19T17:00:00Z", isSprint: false },
+  { round: 6,  name: "Miami",              location: "Miami",        date: "2026-05-03", fp1: "2026-05-01T13:00:00Z", sprintQualStart: "2026-05-01T17:00:00Z",                            raceStart: "2026-05-03T19:30:00Z", isSprint: true  },
+  { round: 7,  name: "Canada",             location: "Montreal",     date: "2026-05-24", fp1: "2026-05-22T14:00:00Z", sprintQualStart: "2026-05-22T18:00:00Z",                            raceStart: "2026-05-24T18:00:00Z", isSprint: true  },
+  { round: 8,  name: "Monaco",             location: "Monte Carlo",  date: "2026-06-07", fp1: "2026-06-05T14:00:00Z", fp2: "2026-06-05T17:30:00Z",                                       raceStart: "2026-06-07T13:00:00Z", isSprint: false },
+  { round: 9,  name: "Barcelona-Catalunya",location: "Barcelona",    date: "2026-06-14", fp1: "2026-06-12T13:00:00Z", fp2: "2026-06-12T16:30:00Z",                                       raceStart: "2026-06-14T13:00:00Z", isSprint: false },
+  { round: 10, name: "Austria",            location: "Spielberg",    date: "2026-06-28", fp1: "2026-06-26T14:00:00Z", fp2: "2026-06-26T17:30:00Z",                                       raceStart: "2026-06-28T13:00:00Z", isSprint: false },
+  { round: 11, name: "Great Britain",      location: "Silverstone",  date: "2026-07-05", fp1: "2026-07-03T13:00:00Z", sprintQualStart: "2026-07-03T17:00:00Z",                            raceStart: "2026-07-05T14:00:00Z", isSprint: true  },
+  { round: 12, name: "Belgium",            location: "Spa",          date: "2026-07-19", fp1: "2026-07-17T14:00:00Z", fp2: "2026-07-17T17:30:00Z",                                       raceStart: "2026-07-19T13:00:00Z", isSprint: false },
+  { round: 13, name: "Hungary",            location: "Budapest",     date: "2026-07-26", fp1: "2026-07-24T14:00:00Z", fp2: "2026-07-24T17:30:00Z",                                       raceStart: "2026-07-26T13:00:00Z", isSprint: false },
+  { round: 14, name: "Netherlands",        location: "Zandvoort",    date: "2026-08-23", fp1: "2026-08-21T14:00:00Z", sprintQualStart: "2026-08-21T18:00:00Z",                            raceStart: "2026-08-23T13:00:00Z", isSprint: true  },
+  { round: 15, name: "Italy",              location: "Monza",        date: "2026-09-06", fp1: "2026-09-04T13:00:00Z", fp2: "2026-09-04T16:30:00Z",                                       raceStart: "2026-09-06T13:00:00Z", isSprint: false },
+  { round: 16, name: "Spain",              location: "Madrid",       date: "2026-09-13", fp1: "2026-09-11T14:00:00Z", fp2: "2026-09-11T17:30:00Z",                                       raceStart: "2026-09-13T13:00:00Z", isSprint: false },
+  { round: 17, name: "Azerbaijan",         location: "Baku",         date: "2026-09-27", fp1: "2026-09-25T12:00:00Z", fp2: "2026-09-25T15:30:00Z",                                       raceStart: "2026-09-27T11:00:00Z", isSprint: false },
+  { round: 18, name: "Singapore",          location: "Singapore",    date: "2026-10-11", fp1: "2026-10-09T14:00:00Z", sprintQualStart: "2026-10-09T18:00:00Z",                            raceStart: "2026-10-11T12:00:00Z", isSprint: true  },
+  { round: 19, name: "United States",      location: "Austin",       date: "2026-10-25", fp1: "2026-10-23T12:00:00Z", fp2: "2026-10-23T15:30:00Z",                                       raceStart: "2026-10-25T19:00:00Z", isSprint: false },
+  { round: 20, name: "Mexico",             location: "Mexico City",  date: "2026-11-01", fp1: "2026-10-30T18:00:00Z", fp2: "2026-10-30T21:30:00Z",                                       raceStart: "2026-11-01T20:00:00Z", isSprint: false },
+  { round: 21, name: "Brazil",             location: "São Paulo",    date: "2026-11-08", fp1: "2026-11-06T11:00:00Z", fp2: "2026-11-06T14:30:00Z",                                       raceStart: "2026-11-08T17:00:00Z", isSprint: false },
+  { round: 22, name: "Las Vegas",          location: "Las Vegas",    date: "2026-11-21", fp1: "2026-11-19T22:00:00Z", fp2: "2026-11-20T01:30:00Z",                                       raceStart: "2026-11-22T06:00:00Z", isSprint: false },
+  { round: 23, name: "Qatar",              location: "Lusail",       date: "2026-11-29", fp1: "2026-11-27T15:00:00Z", fp2: "2026-11-27T18:30:00Z",                                       raceStart: "2026-11-29T16:00:00Z", isSprint: false },
+  { round: 24, name: "Abu Dhabi",          location: "Yas Island",   date: "2026-12-06", fp1: "2026-12-04T08:00:00Z", fp2: "2026-12-04T11:30:00Z",                                       raceStart: "2026-12-06T13:00:00Z", isSprint: false },
 ];
 
 const F1_DRIVERS = [
@@ -104,35 +104,33 @@ function getCurrentRound() {
   return 1;
 }
 
+// Returns the prediction lock time for a race:
+// - Sprint weekends: 30 min before Sprint Qualifying
+// - Normal weekends: 30 min before FP2
+// Falls back to 5h before race start if session times are missing.
+function getPredictionLockTime(race) {
+  if (!race) return null;
+  const sessionStr = race.isSprint ? race.sprintQualStart : race.fp2;
+  if (sessionStr) return new Date(new Date(sessionStr).getTime() - 30 * 60 * 1000);
+  return race.raceStart ? new Date(new Date(race.raceStart).getTime() - 5 * 60 * 60 * 1000) : null;
+}
+
 function getTimeUntilLock(race) {
-  if (!race || !race.raceStart) return "N/A";
-
-  // Race start time minus 5 hours = lock time
-  const raceTime = new Date(race.raceStart);
-  const lockTime = new Date(raceTime.getTime() - (5 * 60 * 60 * 1000));
-
-  const now = new Date();
-  const diff = lockTime - now;
-
+  const lockTime = getPredictionLockTime(race);
+  if (!lockTime) return "N/A";
+  const diff = lockTime - new Date();
   if (diff <= 0) return "LOCKED";
-
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
   const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
   const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-
   if (days > 0) return `${days}d ${hours}h`;
   if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
 }
 
 function isEditLocked(race) {
-  if (!race || !race.raceStart) return false;
-
-  // Race start time minus 5 hours = lock time
-  const raceTime = new Date(race.raceStart);
-  const lockTime = new Date(raceTime.getTime() - (5 * 60 * 60 * 1000));
-
-  return new Date() >= lockTime;
+  const lockTime = getPredictionLockTime(race);
+  return lockTime ? new Date() >= lockTime : false;
 }
 
 // SCHEDULE SYNC — runs on app load, checks Jolpica API against hardcoded schedule
@@ -176,6 +174,8 @@ export default function F1League() {
   const [currentView, setCurrentView] = useState("leaderboard");
   const [countdown, setCountdown] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [renameTarget, setRenameTarget] = useState(null); // { id, name }
+  const [renameValue, setRenameValue] = useState("");
   const [inviteLink, setInviteLink] = useState("");
   const [copiedLink, setCopiedLink] = useState(false);
 
@@ -282,6 +282,18 @@ export default function F1League() {
     }
   };
 
+  const renameLeague = async () => {
+    if (!renameValue.trim() || !renameTarget) return;
+    try {
+      await updateDoc(doc(db, "groups", renameTarget.id), { name: renameValue.trim() });
+      setRenameTarget(null);
+      setRenameValue("");
+      await loadUserGroups(user.uid);
+    } catch (error) {
+      console.error("Error renaming league:", error);
+    }
+  };
+
   const deleteLeague = async (groupId) => {
     if (!user) return;
     try {
@@ -342,7 +354,12 @@ export default function F1League() {
                   <h3 className="text-xl font-bold text-white mb-1">{group.name}</h3>
                   <p className="text-sm text-gray-400">{group.members.length} members</p>
                 </button>
-                <button onClick={() => setDeleteConfirm(group.id)} className="ml-4 px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded text-sm font-bold">Delete</button>
+                {group.admin === user.uid && (
+                  <div className="flex gap-2 ml-4">
+                    <button onClick={() => { setRenameTarget(group); setRenameValue(group.name); }} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm font-bold">Rename</button>
+                    <button onClick={() => setDeleteConfirm(group.id)} className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded text-sm font-bold">Delete</button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -385,6 +402,25 @@ export default function F1League() {
                 <div className="flex gap-2">
                   <button onClick={() => deleteLeague(deleteConfirm)} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded">Delete</button>
                   <button onClick={() => setDeleteConfirm(null)} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 rounded">Cancel</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {renameTarget && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+              <div className="bg-gray-900 border-2 border-red-600 rounded-lg p-6 w-full max-w-md">
+                <h2 className="text-2xl font-bold text-white mb-4">Rename League</h2>
+                <input
+                  type="text"
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && renameLeague()}
+                  className="w-full bg-gray-800 border border-gray-700 rounded p-3 text-white mb-4 focus:outline-none focus:border-red-600"
+                />
+                <div className="flex gap-2">
+                  <button onClick={renameLeague} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded">Save</button>
+                  <button onClick={() => setRenameTarget(null)} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 rounded">Cancel</button>
                 </div>
               </div>
             </div>
@@ -455,7 +491,7 @@ export default function F1League() {
             {currentView === "seasonBoard" && <SeasonBoardView group={selectedGroup} user={user} />}
             {currentView === "howToPlay" && <HowToPlayView />}
             {currentView === "results" && <ResultsView group={selectedGroup} user={user} currentRound={currentRound} />}
-            {currentView === "invites" && <InvitesView group={selectedGroup} generateInviteLink={generateInviteLink} inviteLink={inviteLink} copiedLink={copiedLink} />}
+            {currentView === "invites" && <InvitesView group={selectedGroup} user={user} generateInviteLink={generateInviteLink} inviteLink={inviteLink} copiedLink={copiedLink} onGroupUpdated={() => loadUserGroups(user.uid)} />}
             {currentView === "audit" && selectedGroup.admin === user.uid && <AuditView group={selectedGroup} />}
           </div>
         </div>
@@ -1314,19 +1350,25 @@ function HowToPlayView() {
               <p>After the race, the admin records where your predicted driver <span className="text-white font-semibold">actually finished</span>. The player whose driver finished <span className="text-white font-semibold">closest to the target position</span> wins the bonus.</p>
               <div className="bg-gray-900 rounded p-3 mt-2 text-xs space-y-1 text-gray-400">
                 <p className="text-white font-semibold mb-1">Example — Target: P10</p>
-                <p>Josh predicted Hadjar → finished P8 → distance 2</p>
-                <p>Nick predicted Bearman → finished P11 → distance 1 <span className="text-green-400 font-bold">← closest, +1 pt</span></p>
-                <p>Radz predicted Bortoleto → DNS → distance ∞ → 0 pts</p>
+                <p>Player 1 predicted Hadjar → finished P8 → distance 2</p>
+                <p>Player 2 predicted Bearman → finished P11 → distance 1 <span className="text-green-400 font-bold">← closest, +1 pt</span></p>
+                <p>Player 3 predicted Bortoleto → DNS → distance ∞ → 0 pts</p>
               </div>
             </div>
           </div>
 
           <div>
             <h3 className="text-lg font-bold text-red-400 mb-3">🔒 Prediction Lock Window</h3>
-            <div className="bg-gray-800 rounded p-4 text-sm text-gray-300 space-y-1">
-              <p>Predictions lock <span className="text-white font-semibold">5 hours before race start</span>. Edit anytime before that.</p>
-              <p>For sprint weekends, the lock applies before the sprint session begins.</p>
-              <p className="text-red-400 text-xs mt-2">Once locked, no changes can be made — plan ahead.</p>
+            <div className="bg-gray-800 rounded p-4 text-sm text-gray-300 space-y-2">
+              <div className="flex gap-3">
+                <span className="text-yellow-400 font-bold w-28 shrink-0">Normal race:</span>
+                <span>Lock at <span className="text-white font-semibold">30 minutes before FP2</span> (Friday afternoon)</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-yellow-400 font-bold w-28 shrink-0">Sprint weekend:</span>
+                <span>Lock at <span className="text-white font-semibold">30 minutes before Sprint Qualifying</span> (Friday afternoon)</span>
+              </div>
+              <p className="text-red-400 text-xs pt-1">Once locked, no changes can be made — plan ahead.</p>
             </div>
           </div>
 
@@ -1407,6 +1449,7 @@ function useF1ApiSchedule(season = 2026) {
           const round = parseInt(race.round);
           schedule[round] = {
             raceStart: toIso(race),
+            fp2Start: toIso(race.SecondPractice),
             sprintStart: toIso(race.Sprint),
             sprintQualifyingStart: toIso(race.SprintQualifying),
             qualifyingStart: toIso(race.Qualifying),
@@ -2106,12 +2149,13 @@ function ResultsView({ group, user, currentRound }) {
 }
 
 // INVITES VIEW
-function InvitesView({ group, generateInviteLink, inviteLink, copiedLink }) {
+function InvitesView({ group, user, generateInviteLink, inviteLink, copiedLink, onGroupUpdated }) {
   const [memberNicknames, setMemberNicknames] = useState({});
+  const [removeConfirm, setRemoveConfirm] = useState(null); // memberId
+  const isAdmin = group?.admin === user?.uid;
 
   useEffect(() => {
     if (!group) return;
-
     const loadMemberNicknames = async () => {
       try {
         const nicknames = {};
@@ -2127,6 +2171,16 @@ function InvitesView({ group, generateInviteLink, inviteLink, copiedLink }) {
     };
     loadMemberNicknames();
   }, [group]);
+
+  const removePlayer = async (memberId) => {
+    try {
+      await updateDoc(doc(db, "groups", group.id), { members: arrayRemove(memberId) });
+      setRemoveConfirm(null);
+      if (onGroupUpdated) onGroupUpdated();
+    } catch (error) {
+      console.error("Error removing player:", error);
+    }
+  };
 
   return (
     <div className="bg-gray-900 border border-red-600/50 rounded-lg p-6">
@@ -2151,13 +2205,36 @@ function InvitesView({ group, generateInviteLink, inviteLink, copiedLink }) {
         {group.members?.map(memberId => (
           <div key={memberId} className="bg-gray-800 p-3 rounded text-gray-300 flex items-center gap-2">
             <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center text-white text-sm font-bold">
-              {(memberNicknames[memberId] || "Unknown").slice(0, 1).toUpperCase()}
+              {(memberNicknames[memberId] || "?").slice(0, 1).toUpperCase()}
             </div>
             <span className="flex-1">{memberNicknames[memberId] || "Unknown"}</span>
             {memberId === group.admin && <span className="text-xs bg-red-600 px-2 py-1 rounded">ADMIN</span>}
+            {isAdmin && memberId !== group.admin && (
+              <button
+                onClick={() => setRemoveConfirm(memberId)}
+                className="text-xs bg-gray-700 hover:bg-red-700 text-gray-400 hover:text-white px-2 py-1 rounded transition"
+              >
+                Remove
+              </button>
+            )}
           </div>
         ))}
       </div>
+
+      {removeConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-900 border-2 border-red-600 rounded-lg p-6 w-full max-w-sm">
+            <h2 className="text-xl font-bold text-white mb-2">Remove Player?</h2>
+            <p className="text-gray-300 text-sm mb-6">
+              Remove <span className="text-white font-bold">{memberNicknames[removeConfirm] || "this player"}</span> from the league?
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => removePlayer(removeConfirm)} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded">Remove</button>
+              <button onClick={() => setRemoveConfirm(null)} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 rounded">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2462,13 +2539,14 @@ function CalendarView({ group, user, currentRound }) {
   };
 
   const renderUpcomingDetails = (race) => {
-    const lockTime = new Date(new Date(race.raceStart).getTime() - 5 * 60 * 60 * 1000);
+    const lockTime = getPredictionLockTime(race);
     const fmtOpts = { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' };
+    const lockLabel = race.isSprint ? '30 min before Sprint Qualifying' : '30 min before FP2';
     return (
       <div className="mt-3 pt-3 border-t border-gray-700">
         <div className="bg-gray-900 rounded p-3 text-xs text-gray-400 space-y-1">
           <p>Race start: <span className="text-gray-200">{new Date(race.raceStart).toLocaleString('en-US', fmtOpts)}</span></p>
-          <p>Predictions lock: <span className="text-gray-200">{lockTime.toLocaleString('en-US', fmtOpts)}</span></p>
+          <p>Predictions lock: <span className="text-gray-200">{lockTime ? lockTime.toLocaleString('en-US', fmtOpts) : '—'}</span> <span className="text-gray-500">({lockLabel})</span></p>
         </div>
       </div>
     );
