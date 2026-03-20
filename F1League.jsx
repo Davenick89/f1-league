@@ -6,13 +6,15 @@ import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { Menu, X, LogOut, Plus, Users, Trophy, BarChart3, Settings, Copy, Check, Calendar, Lock, Edit } from 'lucide-react';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+  appId:             import.meta.env.VITE_FIREBASE_APP_ID,
 };
+
+const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY;
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -300,7 +302,7 @@ export default function F1League() {
       // Register the service worker first so FCM can use it
       const swReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
       const token = await getToken(messaging, {
-        vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY,
+        vapidKey: VAPID_KEY,
         serviceWorkerRegistration: swReg,
       });
       const newSettings = { ...notifSettings, pushNotifications: true };
