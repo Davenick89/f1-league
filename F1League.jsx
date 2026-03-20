@@ -153,8 +153,9 @@ function isEditLocked(race) {
 }
 
 // Returns display name: custom nickname > first letter of email > "?"
-function getDisplayName(nickname, email) {
+function getDisplayName(nickname, googleFirstName, email) {
   if (nickname && nickname.trim()) return nickname.trim();
+  if (googleFirstName && googleFirstName.trim()) return googleFirstName.trim();
   if (email) return email.charAt(0).toUpperCase();
   return '?';
 }
@@ -188,6 +189,87 @@ async function syncScheduleWithAPI() {
   }
 }
 
+function GroupStandingBadge({ groupId, userId }) {
+  const [standing, setStanding] = React.useState(null);
+
+  React.useEffect(() => {
+    const load = async () => {
+      try {
+        const scoresSnap = await getDocs(collection(db, `groups/${groupId}/scores`));
+        let userPts = 0;
+        let rank = 1;
+        scoresSnap.docs.forEach(d => {
+          let pts = 0;
+          for (let i = 1; i <= 24; i++) pts += d.data()[`round${i}`]?.totalPoints || 0;
+          if (d.id === userId) userPts = pts;
+        });
+        scoresSnap.docs.forEach(d => {
+          let pts = 0;
+          for (let i = 1; i <= 24; i++) pts += d.data()[`round${i}`]?.totalPoints || 0;
+          if (pts > userPts) rank++;
+        });
+        if (scoresSnap.docs.some(d => d.id === userId)) setStanding({ rank, pts: userPts });
+      } catch {}
+    };
+    load();
+  }, [groupId, userId]);
+
+  if (!standing) return null;
+  return (
+    <div className="flex items-center gap-2 mt-2">
+      <span className="text-xs text-gray-500">
+        {standing.rank === 1 ? '🥇' : standing.rank === 2 ? '🥈' : standing.rank === 3 ? '🥉' : `#${standing.rank}`}
+        {' '}P{standing.rank}
+      </span>
+      <span className="text-xs font-black" style={{ color: '#DC0000' }}>{standing.pts} PTS</span>
+    </div>
+  );
+}
+
+function SetNicknameModal({ googleFirstName, onSave, onSkip }) {
+  const [value, setValue] = React.useState(googleFirstName || '');
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+      <div className="bg-gray-950 border border-gray-800 rounded-2xl p-6 w-full max-w-sm">
+        <div className="text-3xl mb-3 text-center">👋</div>
+        <h2 className="text-lg font-black text-white mb-1 text-center" style={{ fontFamily: 'Orbitron' }}>
+          WELCOME!
+        </h2>
+        <p className="text-gray-400 text-sm text-center mb-5">
+          {googleFirstName ? `Hi ${googleFirstName}! ` : ''}How should teammates call you?
+        </p>
+        <input
+          type="text"
+          placeholder={googleFirstName ? `e.g. ${googleFirstName}` : 'e.g. Josh'}
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && value.trim() && onSave(value.trim())}
+          autoFocus
+          maxLength={20}
+          className="w-full bg-gray-900 border-2 border-gray-800 focus:border-red-600 rounded-xl p-3 text-white mb-4 outline-none transition"
+        />
+        <div className="flex gap-2">
+          {googleFirstName && (
+            <button
+              onClick={() => onSave(googleFirstName)}
+              className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-2.5 rounded-xl text-sm transition"
+            >
+              Use "{googleFirstName}"
+            </button>
+          )}
+          <button
+            onClick={() => value.trim() ? onSave(value.trim()) : onSkip()}
+            className="flex-1 bg-red-600 hover:bg-red-700 text-white font-black py-2.5 rounded-xl transition"
+          >
+            {value.trim() ? 'Save' : 'Skip'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function F1League() {
   const [user, setUser] = useState(null);
   const [groups, setGroups] = useState([]);
@@ -210,6 +292,8 @@ export default function F1League() {
   const [notifSettings, setNotifSettings] = useState({ pushNotifications: false, reminderMinutesBefore: 30 });
   const [notifStatus, setNotifStatus] = useState('idle'); // 'idle' | 'requesting' | 'granted' | 'denied'
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showNicknameSetup, setShowNicknameSetup] = useState(false);
+  const [googleFirstName, setGoogleFirstName] = useState('');
 
   // Run schedule sync once on mount
   useEffect(() => { syncScheduleWithAPI(); }, []);
@@ -222,11 +306,14 @@ export default function F1League() {
         const profileDoc = await getDoc(profileRef);
         if (!profileDoc.exists()) {
           // New user — create profile and trigger onboarding
-          await setDoc(profileRef, { email: authUser.email, nickname: "", isNewAdmin: true, createdAt: serverTimestamp() });
+          const gFirstName = authUser.displayName?.split(' ')[0] || '';
+          await setDoc(profileRef, { email: authUser.email, nickname: "", googleFirstName: gFirstName, isNewAdmin: true, createdAt: serverTimestamp() });
+          setShowNicknameSetup(true);
           setShowOnboarding(true);
         } else {
           const profileData = profileDoc.data();
           setNickname(profileData.nickname || "");
+          setGoogleFirstName(profileData.googleFirstName || '');
           const saved = profileData.notificationSettings;
           if (saved) setNotifSettings(saved);
           // Reflect browser permission state in case it changed outside the app
@@ -320,6 +407,14 @@ export default function F1League() {
   const handleSignOut = async () => {
     await signOut(auth);
     setSelectedGroup(null);
+  };
+
+  const saveNicknameSetup = async (name) => {
+    if (user && name) {
+      await setDoc(doc(db, "users", user.uid), { nickname: name }, { merge: true });
+      setNickname(name);
+    }
+    setShowNicknameSetup(false);
   };
 
   const saveNickname = async () => {
@@ -479,6 +574,10 @@ export default function F1League() {
     return <AdminWizard user={user} onComplete={completeOnboarding} />;
   }
 
+  if (showNicknameSetup) {
+    return <SetNicknameModal googleFirstName={googleFirstName} onSave={saveNicknameSetup} onSkip={() => setShowNicknameSetup(false)} />;
+  }
+
   if (!selectedGroup) {
     return (
       <div className="min-h-screen bg-black p-4 text-white">
@@ -509,6 +608,7 @@ export default function F1League() {
                     <div>
                       <h3 className="text-lg font-black text-white group-hover:text-red-400 transition">{group.name}</h3>
                       <p className="text-xs text-gray-600 mt-1">{group.members.length} member{group.members.length !== 1 ? 's' : ''}{group.admin === user.uid ? ' · Admin' : ''}</p>
+                      <GroupStandingBadge groupId={group.id} userId={user.uid} />
                     </div>
                     <span className="text-gray-700 group-hover:text-red-600 transition text-xl">›</span>
                   </div>
@@ -735,7 +835,7 @@ export default function F1League() {
 
           {/* Main Content */}
           <div className="lg:col-span-3">
-            {currentView === "leaderboard" && <LeaderboardView group={selectedGroup} currentRound={currentRound} />}
+            {currentView === "leaderboard" && <LeaderboardView group={selectedGroup} currentRound={currentRound} user={user} />}
             {currentView === "predict" && <PredictionView group={selectedGroup} race={race} currentRound={currentRound} countdown={countdown} user={user} />}
             {currentView === "calendar" && <CalendarView group={selectedGroup} user={user} currentRound={currentRound} />}
             {currentView === "seasonBoard" && <SeasonBoardView group={selectedGroup} user={user} />}
@@ -1249,8 +1349,213 @@ function AdminWizard({ user, onComplete }) {
 }
 
 // LEADERBOARD VIEW
-function LeaderboardView({ group, currentRound }) {
+function UserStatsCard({ group, userId, currentRound }) {
+  const [stats, setStats] = React.useState(null);
+
+  React.useEffect(() => {
+    if (!userId || !group || currentRound < 2) return;
+    const load = async () => {
+      try {
+        const [scoresDoc, predsDoc] = await Promise.all([
+          getDoc(doc(db, `groups/${group.id}/scores`, userId)),
+          getDoc(doc(db, `groups/${group.id}/predictions`, userId)),
+        ]);
+        if (!scoresDoc.exists()) return;
+        const scoresData = scoresDoc.data();
+        const predsData = predsDoc.exists() ? predsDoc.data() : {};
+
+        let totalCorrect = 0, totalPreds = 0, racesWithPts = 0, participated = 0;
+        const roundPts = [];
+
+        for (let r = 1; r < currentRound; r++) {
+          const roundScore = scoresData[`round${r}`];
+          const roundPred = predsData[`round${r}`];
+          if (!roundScore || !roundPred) continue;
+          participated++;
+          const pts = roundScore.totalPoints || 0;
+          roundPts.push({ round: r, pts });
+          if (pts > 0) racesWithPts++;
+          const bd = roundScore.breakdown || {};
+          const race = F1_SCHEDULE_2026[r - 1];
+          const fields = ['pole', 'raceP1', 'raceP2', 'raceP3'];
+          if (race?.isSprint) fields.push('sprintQualPole', 'sprintP1', 'sprintP2', 'sprintP3');
+          fields.forEach(f => {
+            if (roundPred[f]) { totalPreds++; if (bd[f] > 0) totalCorrect++; }
+          });
+          if (roundPred.finisherPosition) { totalPreds++; if ((bd.randomFinisher || 0) > 0) totalCorrect++; }
+        }
+
+        let streak = 0;
+        for (let i = roundPts.length - 1; i >= 0; i--) {
+          if (roundPts[i].pts > 0) streak++; else break;
+        }
+        const best = roundPts.length > 0 ? roundPts.reduce((a, b) => a.pts >= b.pts ? a : b) : null;
+        setStats({
+          accuracy: totalPreds > 0 ? Math.round((totalCorrect / totalPreds) * 100) : 0,
+          totalCorrect, totalPreds,
+          successRate: participated > 0 ? Math.round((racesWithPts / participated) * 100) : 0,
+          racesWithPts, participated, streak, best,
+        });
+      } catch (e) { console.error(e); }
+    };
+    load();
+  }, [userId, group, currentRound]);
+
+  if (!stats || stats.participated === 0) return null;
+
+  return (
+    <div className="bg-gray-950 border border-gray-800 rounded-2xl p-5 mb-4">
+      <p className="text-xs font-black text-gray-600 tracking-widest mb-3">YOUR PERFORMANCE</p>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="bg-gray-900 rounded-xl p-3">
+          <p className="text-xs text-gray-600 mb-1">Prediction Accuracy</p>
+          <p className="text-xl font-black" style={{ color: '#DC0000' }}>{stats.accuracy}%</p>
+          <p className="text-xs text-gray-600">{stats.totalCorrect}/{stats.totalPreds} correct</p>
+        </div>
+        <div className="bg-gray-900 rounded-xl p-3">
+          <p className="text-xs text-gray-600 mb-1">Success Rate</p>
+          <p className="text-xl font-black text-white">{stats.successRate}%</p>
+          <p className="text-xs text-gray-600">{stats.racesWithPts}/{stats.participated} races scored</p>
+        </div>
+        {stats.best && (
+          <div className="bg-gray-900 rounded-xl p-3">
+            <p className="text-xs text-gray-600 mb-1">Best Round</p>
+            <p className="text-base font-black text-yellow-400">R{stats.best.round} · +{stats.best.pts}pts</p>
+          </div>
+        )}
+        {stats.streak > 0 && (
+          <div className="bg-gray-900 rounded-xl p-3">
+            <p className="text-xs text-gray-600 mb-1">Current Streak</p>
+            <p className="text-base font-black text-green-400">{stats.streak} race{stats.streak !== 1 ? 's' : ''} 🔥</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PlayerSummaryModal({ group, playerId, playerName, currentRound, onClose }) {
+  const [data, setData] = React.useState(null);
+
+  React.useEffect(() => {
+    const handleEsc = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [onClose]);
+
+  React.useEffect(() => {
+    if (!playerId || !group) return;
+    const load = async () => {
+      try {
+        const [scoresDoc, predsDoc] = await Promise.all([
+          getDoc(doc(db, `groups/${group.id}/scores`, playerId)),
+          getDoc(doc(db, `groups/${group.id}/predictions`, playerId)),
+        ]);
+        const scoresData = scoresDoc.exists() ? scoresDoc.data() : {};
+        const predsData = predsDoc.exists() ? predsDoc.data() : {};
+
+        const rounds = [];
+        let totalPts = 0, totalCorrect = 0, totalPreds = 0;
+
+        for (let r = 1; r < currentRound; r++) {
+          const roundScore = scoresData[`round${r}`];
+          const roundPred = predsData[`round${r}`];
+          const race = F1_SCHEDULE_2026[r - 1];
+          if (!roundPred) continue;
+
+          // Load results for this round
+          let results = {};
+          try {
+            const resDoc = await getDoc(doc(db, `groups/${group.id}/results`, `round${r}`));
+            if (resDoc.exists()) results = resDoc.data();
+          } catch {}
+
+          const pts = roundScore?.totalPoints || 0;
+          const bd = roundScore?.breakdown || {};
+          totalPts += pts;
+
+          const fields = [
+            { key: 'pole', label: 'Pole' },
+            ...(race?.isSprint ? [
+              { key: 'sprintQualPole', label: 'SQ Pole' },
+              { key: 'sprintP1', label: 'Sprint P1' },
+              { key: 'sprintP2', label: 'Sprint P2' },
+              { key: 'sprintP3', label: 'Sprint P3' },
+            ] : []),
+            { key: 'raceP1', label: 'Race P1' },
+            { key: 'raceP2', label: 'Race P2' },
+            { key: 'raceP3', label: 'Race P3' },
+            { key: 'finisherPosition', label: 'R# Pick', scoreKey: 'randomFinisher' },
+          ];
+
+          const predictions = fields.map(({ key, label, scoreKey }) => {
+            const predicted = roundPred[key];
+            const actual = results[scoreKey === 'randomFinisher' ? 'finisherAtPosition' : key];
+            const fieldPts = bd[scoreKey || key] || 0;
+            if (!predicted) return null;
+            totalPreds++;
+            if (fieldPts > 0) totalCorrect++;
+            return { label, predicted, actual: actual || '—', correct: fieldPts > 0, pts: fieldPts };
+          }).filter(Boolean);
+
+          rounds.push({ round: r, name: race?.name || `R${r}`, pts, predictions });
+        }
+
+        setData({ rounds, totalPts, accuracy: totalPreds > 0 ? Math.round((totalCorrect / totalPreds) * 100) : 0 });
+      } catch (e) { console.error(e); }
+    };
+    load();
+  }, [playerId, group, currentRound]);
+
+  return (
+    <div className="fixed inset-0 bg-black/85 flex items-start justify-center p-4 z-50 overflow-y-auto" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-gray-950 border border-gray-800 rounded-2xl w-full max-w-lg my-4">
+        <div className="flex items-center justify-between p-5 border-b border-gray-800">
+          <div>
+            <h2 className="text-lg font-black text-white" style={{ fontFamily: 'Orbitron' }}>{playerName}</h2>
+            {data && <p className="text-xs text-gray-500 mt-0.5">{data.totalPts} PTS · {data.accuracy}% accuracy</p>}
+          </div>
+          <button onClick={onClose} className="text-gray-600 hover:text-white p-1.5 rounded-lg hover:bg-gray-800 transition"><X size={18} /></button>
+        </div>
+
+        {!data ? (
+          <p className="text-gray-500 text-center py-10 text-sm">Loading...</p>
+        ) : data.rounds.length === 0 ? (
+          <p className="text-gray-500 text-center py-10 text-sm">No predictions yet.</p>
+        ) : (
+          <div className="divide-y divide-gray-800/50">
+            {data.rounds.map(round => (
+              <div key={round.round} className="p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-black text-gray-500 tracking-widest">R{round.round} · {round.name.toUpperCase()}</span>
+                  <span className="text-sm font-black" style={{ color: round.pts > 0 ? '#DC0000' : undefined }}>{round.pts > 0 ? `+${round.pts} PTS` : '0 PTS'}</span>
+                </div>
+                <div className="space-y-1">
+                  {round.predictions.map((pred, i) => (
+                    <div key={i} className="flex items-center justify-between text-xs">
+                      <span className="text-gray-600 w-20 shrink-0">{pred.label}</span>
+                      <span className={`flex-1 truncate ${pred.correct ? 'text-green-400' : 'text-gray-400'}`}>
+                        {pred.correct ? '✓' : '✗'} {pred.predicted}
+                      </span>
+                      {!pred.correct && pred.actual !== '—' && (
+                        <span className="text-gray-600 text-xs ml-2 truncate max-w-[80px]">→ {pred.actual}</span>
+                      )}
+                      {pred.pts > 0 && <span className="text-green-400 font-bold ml-2 shrink-0">+{pred.pts}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LeaderboardView({ group, currentRound, user }) {
   const [leaderboard, setLeaderboard] = useState([]);
+  const [selectedPlayer, setSelectedPlayer] = React.useState(null);
 
   useEffect(() => {
     if (!group) return;
@@ -1260,7 +1565,7 @@ function LeaderboardView({ group, currentRound }) {
         const leaderboardData = await Promise.all(snapshot.docs.map(async (scoreDoc) => {
           const userRef = doc(db, "users", scoreDoc.id);
           const userDoc = await getDoc(userRef);
-          const nickname = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.email);
+          const nickname = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.googleFirstName, userDoc.data()?.email);
           let totalPoints = 0;
           for (let i = 1; i <= currentRound; i++) {
             totalPoints += scoreDoc.data()[`round${i}`]?.totalPoints || 0;
@@ -1277,28 +1582,40 @@ function LeaderboardView({ group, currentRound }) {
   }, [group, currentRound]);
 
   return (
-    <div className="bg-gray-950 border border-gray-800 rounded-2xl p-6">
-      <h2 className="text-xl font-black mb-1 tracking-wider" style={{ fontFamily: 'Orbitron' }}>CHAMPIONSHIP</h2>
-      <p className="text-xs text-gray-600 tracking-widest mb-5">STANDINGS</p>
-      {leaderboard.length === 0 ? (
-        <p className="text-gray-600 text-center py-10 text-sm">No predictions yet — be the first!</p>
-      ) : (
-        <div className="space-y-2">
-          {leaderboard.map((entry, index) => (
-            <div key={entry.userId} className={`rounded-xl p-4 flex items-center justify-between transition ${index === 0 ? 'bg-gradient-to-r from-yellow-900/30 to-gray-900 border border-yellow-600/30' : 'bg-gray-900 hover:bg-gray-800'}`}>
-              <div className="flex items-center gap-3">
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg font-black shrink-0 ${index === 0 ? 'bg-yellow-600/20' : index === 1 ? 'bg-gray-600/20' : index === 2 ? 'bg-orange-700/20' : 'bg-gray-800'}`}>
-                  {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : <span className="text-sm text-gray-500">{index + 1}</span>}
+    <div>
+      {user && <UserStatsCard group={group} userId={user.uid} currentRound={currentRound} />}
+      <div className="bg-gray-950 border border-gray-800 rounded-2xl p-6">
+        <h2 className="text-xl font-black mb-1 tracking-wider" style={{ fontFamily: 'Orbitron' }}>CHAMPIONSHIP</h2>
+        <p className="text-xs text-gray-600 tracking-widest mb-5">STANDINGS</p>
+        {leaderboard.length === 0 ? (
+          <p className="text-gray-600 text-center py-10 text-sm">No predictions yet — be the first!</p>
+        ) : (
+          <div className="space-y-2">
+            {leaderboard.map((entry, index) => (
+              <div key={entry.userId} className={`rounded-xl p-4 flex items-center justify-between transition ${index === 0 ? 'bg-gradient-to-r from-yellow-900/30 to-gray-900 border border-yellow-600/30' : 'bg-gray-900 hover:bg-gray-800'}`}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg font-black shrink-0 ${index === 0 ? 'bg-yellow-600/20' : index === 1 ? 'bg-gray-600/20' : index === 2 ? 'bg-orange-700/20' : 'bg-gray-800'}`}>
+                    {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : <span className="text-sm text-gray-500">{index + 1}</span>}
+                  </div>
+                  <button onClick={() => setSelectedPlayer({ id: entry.userId, name: entry.nickname })} className="font-bold text-white text-sm hover:text-red-400 transition text-left">{entry.nickname}</button>
                 </div>
-                <p className="font-bold text-white text-sm">{entry.nickname}</p>
+                <div className="text-right">
+                  <p className="text-2xl font-black" style={{ color: index === 0 ? '#FFD700' : '#DC0000' }}>{entry.totalPoints}</p>
+                  <p className="text-xs text-gray-600 tracking-widest">PTS</p>
+                </div>
               </div>
-              <div className="text-right">
-                <p className="text-2xl font-black" style={{ color: index === 0 ? '#FFD700' : '#DC0000' }}>{entry.totalPoints}</p>
-                <p className="text-xs text-gray-600 tracking-widest">PTS</p>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {selectedPlayer && (
+        <PlayerSummaryModal
+          group={group}
+          playerId={selectedPlayer.id}
+          playerName={selectedPlayer.name}
+          currentRound={currentRound}
+          onClose={() => setSelectedPlayer(null)}
+        />
       )}
     </div>
   );
@@ -1500,7 +1817,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
           try {
             const userRef = doc(db, "users", memberId);
             const userDoc = await getDoc(userRef);
-            nicknames[memberId] = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.email);
+            nicknames[memberId] = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.googleFirstName, userDoc.data()?.email);
           } catch (e) {
             nicknames[memberId] = "Unknown";
           }
@@ -1607,7 +1924,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
       const randomRef = doc(db, `groups/${group.id}/randomNumbers`, `round${currentRound}`);
       const userRef = doc(db, "users", user.uid);
       const userDoc = await getDoc(userRef);
-      const nickname = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.email);
+      const nickname = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.googleFirstName, userDoc.data()?.email);
 
       await setDoc(randomRef, {
         number: num,
@@ -1634,7 +1951,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
 
       const userRef = doc(db, "users", user.uid);
       const userDoc = await getDoc(userRef);
-      const userNickname = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.email);
+      const userNickname = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.googleFirstName, userDoc.data()?.email);
 
       const predRef = doc(db, `groups/${group.id}/predictions`, user.uid);
       await setDoc(predRef, {
@@ -2034,7 +2351,7 @@ function SeasonBoardView({ group, user }) {
           try {
             const userRef = doc(db, "users", memberId);
             const userDoc = await getDoc(userRef);
-            nicknames[memberId] = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.email);
+            nicknames[memberId] = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.googleFirstName, userDoc.data()?.email);
           } catch (e) {
             nicknames[memberId] = "Unknown";
           }
@@ -2080,7 +2397,7 @@ function SeasonBoardView({ group, user }) {
     try {
       const userRef = doc(db, "users", user.uid);
       const userDoc = await getDoc(userRef);
-      const userNickname = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.email);
+      const userNickname = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.googleFirstName, userDoc.data()?.email);
 
       const predRef = doc(db, `groups/${group.id}/seasonPredictions`, user.uid);
       await setDoc(predRef, {
@@ -3067,7 +3384,7 @@ function InvitesView({ group, user, generateInviteCode, inviteLink, inviteStats,
         for (const memberId of group.members) {
           const userRef = doc(db, "users", memberId);
           const userDoc = await getDoc(userRef);
-          nicknames[memberId] = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.email);
+          nicknames[memberId] = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.googleFirstName, userDoc.data()?.email);
         }
         setMemberNicknames(nicknames);
       } catch (error) {
@@ -3222,7 +3539,7 @@ function CalendarView({ group, user, currentRound }) {
         await Promise.all((group.members || []).map(async memberId => {
           try {
             const ud = await getDoc(doc(db, "users", memberId));
-            nicknames[memberId] = getDisplayName(ud.data()?.nickname, ud.data()?.email);
+            nicknames[memberId] = getDisplayName(ud.data()?.nickname, ud.data()?.googleFirstName, ud.data()?.email);
           } catch { nicknames[memberId] = '?'; }
         }));
         setMemberNicknames(nicknames);
