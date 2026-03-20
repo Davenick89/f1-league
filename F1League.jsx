@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayRemove, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayRemove, arrayUnion, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { Menu, X, LogOut, Plus, Users, Trophy, BarChart3, Settings, Copy, Check, Calendar, Lock, Edit } from 'lucide-react';
 
@@ -196,7 +196,10 @@ export default function F1League() {
   const [renameTarget, setRenameTarget] = useState(null); // { id, name }
   const [renameValue, setRenameValue] = useState("");
   const [inviteLink, setInviteLink] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
+  const [inviteStats, setInviteStats] = useState(null); // { usedCount }
   const [copiedLink, setCopiedLink] = useState(false);
+  const [pendingInvite, setPendingInvite] = useState(null); // { code, leagueId, leagueName, memberCount }
   const [notifSettings, setNotifSettings] = useState({ pushNotifications: false, reminderMinutesBefore: 30 });
   const [notifStatus, setNotifStatus] = useState('idle'); // 'idle' | 'requesting' | 'granted' | 'denied'
 
@@ -221,9 +224,35 @@ export default function F1League() {
         await loadUserGroups(authUser.uid);
 
         const params = new URLSearchParams(window.location.search);
-        const groupId = params.get('join');
-        if (groupId) {
-          const groupRef = doc(db, "groups", groupId);
+
+        // New invite code flow: ?invite=ABC12XYZ
+        const inviteCodeParam = params.get('invite');
+        if (inviteCodeParam) {
+          const inviteRef = doc(db, "invites", inviteCodeParam);
+          const inviteDoc = await getDoc(inviteRef);
+          if (inviteDoc.exists()) {
+            const inviteData = inviteDoc.data();
+            const groupRef = doc(db, "groups", inviteData.leagueId);
+            const groupDoc = await getDoc(groupRef);
+            if (groupDoc.exists()) {
+              const groupData = groupDoc.data();
+              // Show accept modal instead of auto-joining
+              setPendingInvite({
+                code: inviteCodeParam,
+                leagueId: inviteData.leagueId,
+                leagueName: groupData.name,
+                memberCount: (groupData.members || []).length,
+                alreadyMember: (groupData.members || []).includes(authUser.uid),
+              });
+              window.history.replaceState({}, document.title, window.location.pathname);
+            }
+          }
+        }
+
+        // Legacy direct-join flow: ?join={groupId} — keep for existing links
+        const legacyGroupId = params.get('join');
+        if (legacyGroupId) {
+          const groupRef = doc(db, "groups", legacyGroupId);
           const groupDoc = await getDoc(groupRef);
           if (groupDoc.exists()) {
             const groupData = groupDoc.data();
@@ -232,7 +261,7 @@ export default function F1League() {
               members.push(authUser.uid);
               await updateDoc(groupRef, { members });
             }
-            setSelectedGroup({ id: groupId, ...groupData, members });
+            setSelectedGroup({ id: legacyGroupId, ...groupData, members });
             window.history.replaceState({}, document.title, window.location.pathname);
           }
         }
@@ -377,13 +406,43 @@ export default function F1League() {
     }
   };
 
-  const generateInviteLink = async () => {
+  const generateInviteCode = async () => {
     if (!selectedGroup || !user) return;
-    const link = `${window.location.origin}?join=${selectedGroup.id}`;
-    setInviteLink(link);
-    navigator.clipboard.writeText(link);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
+    try {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let code = '';
+      for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
+      await setDoc(doc(db, "invites", code), {
+        leagueId: selectedGroup.id,
+        createdBy: user.uid,
+        createdAt: serverTimestamp(),
+        usedCount: 0,
+      });
+      const link = `${window.location.origin}?invite=${code}`;
+      setInviteCode(code);
+      setInviteLink(link);
+      setInviteStats({ usedCount: 0 });
+    } catch (e) {
+      console.error("Error generating invite:", e);
+    }
+  };
+
+  const acceptInvite = async () => {
+    if (!pendingInvite || !user) return;
+    try {
+      if (!pendingInvite.alreadyMember) {
+        await updateDoc(doc(db, "groups", pendingInvite.leagueId), { members: arrayUnion(user.uid) });
+        const inviteRef = doc(db, "invites", pendingInvite.code);
+        const inviteSnap = await getDoc(inviteRef);
+        if (inviteSnap.exists()) {
+          await updateDoc(inviteRef, { usedCount: (inviteSnap.data().usedCount || 0) + 1 });
+        }
+        await loadUserGroups(user.uid);
+      }
+      setPendingInvite(null);
+    } catch (e) {
+      console.error("Error accepting invite:", e);
+    }
   };
 
   if (!user) {
@@ -637,11 +696,36 @@ export default function F1League() {
             {currentView === "seasonBoard" && <SeasonBoardView group={selectedGroup} user={user} />}
             {currentView === "howToPlay" && <HowToPlayView />}
             {currentView === "results" && <ResultsView group={selectedGroup} user={user} currentRound={currentRound} />}
-            {currentView === "invites" && <InvitesView group={selectedGroup} user={user} generateInviteLink={generateInviteLink} inviteLink={inviteLink} copiedLink={copiedLink} onGroupUpdated={() => loadUserGroups(user.uid)} />}
+            {currentView === "invites" && <InvitesView group={selectedGroup} user={user} generateInviteCode={generateInviteCode} inviteLink={inviteLink} inviteStats={inviteStats} onGroupUpdated={() => loadUserGroups(user.uid)} />}
             {currentView === "audit" && selectedGroup.admin === user.uid && <AuditView group={selectedGroup} />}
           </div>
         </div>
       </div>
+
+      {pendingInvite && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-900 border-2 border-red-600 rounded-lg p-6 w-full max-w-sm text-center">
+            <div className="text-4xl mb-3">🏎️</div>
+            <h2 className="text-xl font-bold text-white mb-1" style={{ fontFamily: "'Orbitron'" }}>You're Invited!</h2>
+            <p className="text-gray-400 text-sm mb-4">Join the league</p>
+            <div className="bg-gray-800 rounded-lg p-4 mb-5">
+              <p className="text-2xl font-black text-red-500" style={{ fontFamily: "'Orbitron'" }}>{pendingInvite.leagueName}</p>
+              <p className="text-gray-400 text-sm mt-1">{pendingInvite.memberCount} member{pendingInvite.memberCount !== 1 ? 's' : ''}</p>
+            </div>
+            {pendingInvite.alreadyMember ? (
+              <div>
+                <p className="text-green-400 text-sm mb-4">You're already a member of this league.</p>
+                <button onClick={() => setPendingInvite(null)} className="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 rounded">Close</button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <button onClick={acceptInvite} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded">Join League</button>
+                <button onClick={() => setPendingInvite(null)} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 rounded">Decline</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {showSettings && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
@@ -2295,9 +2379,10 @@ function ResultsView({ group, user, currentRound }) {
 }
 
 // INVITES VIEW
-function InvitesView({ group, user, generateInviteLink, inviteLink, copiedLink, onGroupUpdated }) {
+function InvitesView({ group, user, generateInviteCode, inviteLink, inviteStats, onGroupUpdated }) {
   const [memberNicknames, setMemberNicknames] = useState({});
-  const [removeConfirm, setRemoveConfirm] = useState(null); // memberId
+  const [removeConfirm, setRemoveConfirm] = useState(null);
+  const [copied, setCopied] = useState(false);
   const isAdmin = group?.admin === user?.uid;
 
   useEffect(() => {
@@ -2328,21 +2413,54 @@ function InvitesView({ group, user, generateInviteLink, inviteLink, copiedLink, 
     }
   };
 
+  const copyLink = () => {
+    if (!inviteLink) return;
+    navigator.clipboard.writeText(inviteLink);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const shareWhatsApp = () => {
+    if (!inviteLink) return;
+    const text = encodeURIComponent(`Join my F1 2026 Predictions League — ${group.name}!\n${inviteLink}`);
+    window.open(`https://wa.me/?text=${text}`, '_blank');
+  };
+
+  const shareEmail = () => {
+    if (!inviteLink) return;
+    const subject = encodeURIComponent(`Join my F1 Predictions League — ${group.name}`);
+    const body = encodeURIComponent(`Hey!\n\nI'd like you to join my F1 2026 Predictions League: ${group.name}\n\nClick here to join:\n${inviteLink}\n\nSee you on the grid! 🏎️`);
+    window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
+  };
+
   return (
     <div className="bg-gray-900 border border-red-600/50 rounded-lg p-6">
       <h2 className="text-2xl font-bold mb-4" style={{ fontFamily: "'Orbitron'" }}>INVITE FRIENDS</h2>
 
       <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6">
-        <p className="text-sm text-gray-400 mb-4">Share this link:</p>
         {inviteLink ? (
-          <div className="flex gap-2">
-            <input type="text" value={inviteLink} readOnly className="flex-1 bg-gray-900 border border-gray-600 rounded p-2 text-white text-sm" />
-            <button onClick={() => generateInviteLink()} className="bg-red-600 hover:bg-red-700 p-2 rounded transition">
-              {copiedLink ? <Check size={18} /> : <Copy size={18} />}
-            </button>
+          <div>
+            <p className="text-xs text-gray-400 mb-2">Invite link (single-use code):</p>
+            <div className="flex gap-2 mb-3">
+              <input type="text" value={inviteLink} readOnly className="flex-1 bg-gray-900 border border-gray-600 rounded p-2 text-white text-xs font-mono" />
+              <button onClick={copyLink} className="bg-gray-700 hover:bg-gray-600 p-2 rounded transition shrink-0" title="Copy link">
+                {copied ? <Check size={18} className="text-green-400" /> : <Copy size={18} />}
+              </button>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={shareWhatsApp} className="flex-1 bg-green-700 hover:bg-green-600 text-white text-sm font-bold py-2 rounded transition">WhatsApp</button>
+              <button onClick={shareEmail} className="flex-1 bg-blue-700 hover:bg-blue-600 text-white text-sm font-bold py-2 rounded transition">Email</button>
+              <button onClick={generateInviteCode} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white text-sm font-bold py-2 rounded transition">New Code</button>
+            </div>
+            {inviteStats && (
+              <p className="text-xs text-gray-500 mt-3 text-center">This code used by {inviteStats.usedCount} player{inviteStats.usedCount !== 1 ? 's' : ''}</p>
+            )}
           </div>
         ) : (
-          <button onClick={generateInviteLink} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded">Generate Link</button>
+          <div>
+            <p className="text-sm text-gray-400 mb-3">Generate a unique invite link to share with friends.</p>
+            <button onClick={generateInviteCode} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded transition">Generate Invite Link</button>
+          </div>
         )}
       </div>
 
