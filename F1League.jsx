@@ -507,6 +507,34 @@ export default function F1League() {
                   )}
                 </div>
 
+                {/* Email Notifications */}
+                <div className="border-t border-gray-700 pt-5">
+                  <p className="text-sm font-bold text-gray-400 mb-3">EMAIL NOTIFICATIONS</p>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-white font-semibold">Email Reminders</p>
+                        <p className="text-xs text-gray-500 mt-0.5">Sent to your Google account email</p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          const newSettings = { ...notifSettings, emailNotifications: !notifSettings.emailNotifications };
+                          await setDoc(doc(db, "users", user.uid), { notificationSettings: newSettings }, { merge: true });
+                          setNotifSettings(newSettings);
+                        }}
+                        className={`relative w-12 h-6 rounded-full transition-colors ${notifSettings.emailNotifications ? 'bg-red-600' : 'bg-gray-600'}`}
+                      >
+                        <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${notifSettings.emailNotifications ? 'left-6' : 'left-0.5'}`} />
+                      </button>
+                    </div>
+                    {notifSettings.emailNotifications && (
+                      <p className="text-xs text-green-400">
+                        Reminder emails use the same timing as push notifications — adjust above.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
                 <button onClick={() => setShowSettings(false)} className="w-full bg-gray-800 hover:bg-gray-700 text-white font-bold py-2 rounded">Close</button>
               </div>
             </div>
