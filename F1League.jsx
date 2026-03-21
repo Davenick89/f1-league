@@ -3,6 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayRemove, arrayUnion, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
+import { getAnalytics, logEvent, isSupported as analyticsIsSupported } from 'firebase/analytics';
 import { Menu, X, LogOut, Plus, Users, Trophy, BarChart3, Settings, Copy, Check, Calendar, Lock, Edit, Info } from 'lucide-react';
 
 const firebaseConfig = {
@@ -12,6 +13,7 @@ const firebaseConfig = {
   storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
   appId:             import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId:     import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
 const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY;
@@ -20,6 +22,22 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 setPersistence(auth, browserLocalPersistence).catch(e => console.error("Auth error:", e));
 const db = getFirestore(app);
+
+// ─── Analytics ────────────────────────────────────────────────────────────────
+// Initialised lazily — GA4 requires a browser environment and a valid
+// measurementId. Falls back to a no-op so missing config never breaks the app.
+let analytics = null;
+analyticsIsSupported().then(supported => {
+  if (supported && import.meta.env.VITE_FIREBASE_MEASUREMENT_ID &&
+      !import.meta.env.VITE_FIREBASE_MEASUREMENT_ID.includes('XXXXXXXXXX')) {
+    analytics = getAnalytics(app);
+  }
+}).catch(() => {});
+
+function track(eventName, params = {}) {
+  if (!analytics) return;
+  try { logEvent(analytics, eventName, params); } catch (_) {}
+}
 
 // FCM — only initialised in browsers that support service workers + notifications
 let messaging = null;
@@ -308,6 +326,7 @@ export default function F1League() {
           // New user — create profile and trigger onboarding
           const gFirstName = authUser.displayName?.split(' ')[0] || '';
           await setDoc(profileRef, { email: authUser.email, nickname: "", googleFirstName: gFirstName, isNewAdmin: true, createdAt: serverTimestamp() });
+          track('sign_up', { method: 'google' });
           setShowNicknameSetup(true);
           setShowOnboarding(true);
         } else {
@@ -399,6 +418,7 @@ export default function F1League() {
     try {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
+      track('login', { method: 'google' });
     } catch (error) {
       console.error("Sign in error:", error);
     }
@@ -479,6 +499,7 @@ export default function F1League() {
         members: [user.uid],
         createdTimestamp: serverTimestamp()
       });
+      track('league_created', { league_name: groupName.trim() });
       setGroupName("");
       setShowCreateGroup(false);
       await loadUserGroups(user.uid);
@@ -577,6 +598,7 @@ export default function F1League() {
         console.log("ℹ️  [INVITE 7] Already a member — skipping Firestore write");
       }
 
+      track('invite_accepted', { league_id: pendingInvite.leagueId, league_name: pendingInvite.leagueName });
       setShowOnboarding(false);
       setPendingInvite(null);
       console.log("✅ [INVITE 15] Modal closed — done");
@@ -830,6 +852,18 @@ export default function F1League() {
   }
 
   const race = F1_SCHEDULE_2026[currentRound - 1];
+
+  // Track screen views whenever the active tab changes
+  useEffect(() => {
+    if (!selectedGroup) return;
+    track('screen_view', { screen_name: currentView, league_id: selectedGroup.id });
+  }, [currentView, selectedGroup?.id]);
+
+  // Track league entry
+  useEffect(() => {
+    if (!selectedGroup) return;
+    track('select_content', { content_type: 'league', item_id: selectedGroup.id, item_name: selectedGroup.name });
+  }, [selectedGroup?.id]);
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -2037,6 +2071,12 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
         timestampIso: new Date().toISOString(),
       });
 
+      track('prediction_made', {
+        race_name: race?.name || `Round ${currentRound}`,
+        round: currentRound,
+        is_sprint: !!race?.isSprint,
+        league_id: group.id,
+      });
       setUserHasPredictions(true);
       setIsEditing(false);
       setMessage("✅ Predictions saved!");
