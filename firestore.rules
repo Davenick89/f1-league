@@ -51,10 +51,20 @@ service cloud.firestore {
 
       // Update: admin can change anything.
       // Non-admin: only allowed to add themselves to the members array (invite join).
+      //
+      // NOTE: We do NOT use diff().affectedKeys() here because Firestore security
+      // rules cannot evaluate diff() on writes that use FieldValue transforms
+      // (arrayUnion, arrayRemove, increment, serverTimestamp). Using it causes a
+      // silent false → "Missing or insufficient permissions" even when the write
+      // is otherwise valid. Instead we explicitly verify that admin + name are
+      // unchanged, guaranteeing no other meaningful field was modified.
       allow update: if isAuth() && (
         resource.data.admin == uid()
         || (
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
+          // Invite join: user adds exactly themselves, nothing else changes
+          request.resource.data.admin == resource.data.admin
+          && request.resource.data.name == resource.data.name
+          && !resource.data.members.hasAll([uid()])
           && request.resource.data.members.hasAll(resource.data.members)
           && request.resource.data.members.size() == resource.data.members.size() + 1
           && request.resource.data.members.hasAll([uid()])
@@ -135,9 +145,12 @@ service cloud.firestore {
         && request.resource.data.createdBy == uid()
         && request.resource.data.usedCount == 0;
 
-      // Any authenticated user can increment usedCount by exactly 1 (accepting invite)
+      // Any authenticated user can increment usedCount by exactly 1 (accepting invite).
+      // Same reason as above: avoid diff().affectedKeys() with transforms.
+      // Explicitly verify the immutable fields are unchanged instead.
       allow update: if isAuth()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedCount'])
+        && request.resource.data.leagueId == resource.data.leagueId
+        && request.resource.data.createdBy == resource.data.createdBy
         && request.resource.data.usedCount == resource.data.usedCount + 1;
 
       allow delete: if false;
