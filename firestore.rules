@@ -101,6 +101,16 @@ service cloud.firestore {
         allow write: if isAdmin(groupId);
       }
 
+      // ── Random Numbers ───────────────────────────────────────────────────
+      // Any member can read the random number (shown on the Predictions page).
+      // Any member can write it — the UI already prevents overwriting by hiding
+      // the button once a number exists (onSnapshot-driven).
+
+      match /randomNumbers/{roundId} {
+        allow read: if isMember(groupId);
+        allow write: if isMember(groupId);
+      }
+
       // ── Audit Log ────────────────────────────────────────────────────────
       // Only the admin can read the audit log.
       // Any member can append their own prediction-save records.

@@ -1294,7 +1294,7 @@ function AdminWizard({ user, onComplete }) {
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => { const t = encodeURIComponent(`Join my F1 2026 Predictions League — ${createdGroup.name}!\n${inviteLink}`); window.open(`https://wa.me/?text=${t}`, '_blank'); }} className="flex-1 text-white text-xs font-bold py-2.5 rounded-xl transition" style={{ background: '#25d366' }}>WhatsApp</button>
-                      <button onClick={() => { const b = encodeURIComponent(`Join ${createdGroup.name}: ${inviteLink}`); window.open(`mailto:?subject=${encodeURIComponent(`Join ${createdGroup.name}`)}&body=${b}`, '_blank'); }} className="flex-1 bg-blue-700 hover:bg-blue-600 text-white text-xs font-bold py-2.5 rounded-xl transition">Email</button>
+                      <button onClick={() => { const s = encodeURIComponent(`Join ${createdGroup.name}`); const b = encodeURIComponent(`Join ${createdGroup.name}: ${inviteLink}`); window.open(`https://mail.google.com/mail/?view=cm&fs=1&su=${s}&body=${b}`, '_blank'); }} className="flex-1 bg-blue-700 hover:bg-blue-600 text-white text-xs font-bold py-2.5 rounded-xl transition">Email</button>
                     </div>
                   </div>
                 ) : (
@@ -3421,7 +3421,7 @@ function InvitesView({ group, user, generateInviteCode, inviteLink, inviteStats,
     if (!inviteLink) return;
     const subject = encodeURIComponent(`Join my F1 Predictions League — ${group.name}`);
     const body = encodeURIComponent(`Hey!\n\nI'd like you to join my F1 2026 Predictions League: ${group.name}\n\nClick here to join:\n${inviteLink}\n\nSee you on the grid! 🏎️`);
-    window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
+    window.open(`https://mail.google.com/mail/?view=cm&fs=1&su=${subject}&body=${body}`, '_blank');
   };
 
   return (
