@@ -322,31 +322,29 @@ export default function F1League() {
           }
           if (profileData.isNewAdmin) setShowOnboarding(true);
         }
-        await loadUserGroups(authUser.uid);
+        const loadedGroups = await loadUserGroups(authUser.uid);
 
         const params = new URLSearchParams(window.location.search);
 
         // New invite code flow: ?invite=ABC12XYZ
+        // NOTE: We intentionally do NOT read /groups/{id} here because the
+        // user is not yet a member, so that read would be denied by Firestore
+        // rules. The invite doc itself carries leagueName so the modal can
+        // be shown without a second read.
         const inviteCodeParam = params.get('invite');
         if (inviteCodeParam) {
           const inviteRef = doc(db, "invites", inviteCodeParam);
           const inviteDoc = await getDoc(inviteRef);
           if (inviteDoc.exists()) {
             const inviteData = inviteDoc.data();
-            const groupRef = doc(db, "groups", inviteData.leagueId);
-            const groupDoc = await getDoc(groupRef);
-            if (groupDoc.exists()) {
-              const groupData = groupDoc.data();
-              // Show accept modal instead of auto-joining
-              setPendingInvite({
-                code: inviteCodeParam,
-                leagueId: inviteData.leagueId,
-                leagueName: groupData.name,
-                memberCount: (groupData.members || []).length,
-                alreadyMember: (groupData.members || []).includes(authUser.uid),
-              });
-              window.history.replaceState({}, document.title, window.location.pathname);
-            }
+            const alreadyMember = loadedGroups.some(g => g.id === inviteData.leagueId);
+            setPendingInvite({
+              code: inviteCodeParam,
+              leagueId: inviteData.leagueId,
+              leagueName: inviteData.leagueName || "F1 League",
+              alreadyMember,
+            });
+            window.history.replaceState({}, document.title, window.location.pathname);
           }
         }
 
@@ -390,8 +388,10 @@ export default function F1League() {
       const snapshot = await getDocs(q);
       const groupData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setGroups(groupData);
+      return groupData; // caller can use this to check membership without reading state
     } catch (error) {
       console.error("Error loading groups:", error);
+      return [];
     }
   };
 
@@ -523,6 +523,7 @@ export default function F1League() {
       for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
       await setDoc(doc(db, "invites", code), {
         leagueId: selectedGroup.id,
+        leagueName: selectedGroup.name,
         createdBy: user.uid,
         createdAt: serverTimestamp(),
         usedCount: 0,
@@ -808,7 +809,7 @@ export default function F1League() {
             <p className="text-gray-500 text-xs mb-5">Join the league</p>
             <div className="bg-gray-900 rounded-2xl p-4 mb-5">
               <p className="text-xl font-black" style={{ color: '#DC0000', fontFamily: 'Orbitron' }}>{pendingInvite.leagueName}</p>
-              <p className="text-gray-500 text-xs mt-1">{pendingInvite.memberCount} member{pendingInvite.memberCount !== 1 ? 's' : ''}</p>
+              <p className="text-gray-500 text-xs mt-1">F1 Predictions League · 2026</p>
             </div>
             {pendingInvite.alreadyMember ? (
               <div>
@@ -913,7 +914,7 @@ export default function F1League() {
             <p className="text-gray-500 text-xs mb-5">Join the league</p>
             <div className="bg-gray-900 rounded-2xl p-4 mb-5">
               <p className="text-xl font-black" style={{ color: '#DC0000', fontFamily: 'Orbitron' }}>{pendingInvite.leagueName}</p>
-              <p className="text-gray-500 text-xs mt-1">{pendingInvite.memberCount} member{pendingInvite.memberCount !== 1 ? 's' : ''}</p>
+              <p className="text-gray-500 text-xs mt-1">F1 Predictions League · 2026</p>
             </div>
             {pendingInvite.alreadyMember ? (
               <div>
@@ -1244,6 +1245,7 @@ function AdminWizard({ user, onComplete }) {
       for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)];
       await setDoc(doc(db, "invites", code), {
         leagueId: createdGroup.id,
+        leagueName: createdGroup.name,
         createdBy: user.uid,
         createdAt: serverTimestamp(),
         usedCount: 0,
