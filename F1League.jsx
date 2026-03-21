@@ -548,6 +548,7 @@ export default function F1League() {
         }
         await loadUserGroups(user.uid);
       }
+      setShowOnboarding(false); // don't send invite-joiners into the create-league wizard
       setPendingInvite(null);
     } catch (e) {
       console.error("Error accepting invite:", e);
@@ -570,7 +571,7 @@ export default function F1League() {
     return <LandingPage handleGoogleSignIn={handleGoogleSignIn} />;
   }
 
-  if (showOnboarding) {
+  if (showOnboarding && !pendingInvite) {
     return <AdminWizard user={user} onComplete={completeOnboarding} />;
   }
 
@@ -766,6 +767,32 @@ export default function F1League() {
             </div>
           )}
         </div>
+
+      {/* Invite accept modal — shown here so it works when user has no league yet */}
+      {pendingInvite && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-950 border border-gray-800 rounded-2xl p-6 w-full max-w-sm text-center">
+            <div className="text-4xl mb-4">🏎️</div>
+            <h2 className="text-lg font-black text-white mb-1" style={{ fontFamily: 'Orbitron' }}>YOU'RE INVITED!</h2>
+            <p className="text-gray-500 text-xs mb-5">Join the league</p>
+            <div className="bg-gray-900 rounded-2xl p-4 mb-5">
+              <p className="text-xl font-black" style={{ color: '#DC0000', fontFamily: 'Orbitron' }}>{pendingInvite.leagueName}</p>
+              <p className="text-gray-500 text-xs mt-1">{pendingInvite.memberCount} member{pendingInvite.memberCount !== 1 ? 's' : ''}</p>
+            </div>
+            {pendingInvite.alreadyMember ? (
+              <div>
+                <p className="text-green-400 text-sm mb-4">You're already a member of this league.</p>
+                <button onClick={() => setPendingInvite(null)} className="w-full bg-gray-900 hover:bg-gray-800 text-white font-bold py-2.5 rounded-xl transition">Close</button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <button onClick={acceptInvite} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-black py-2.5 rounded-xl transition">Join League</button>
+                <button onClick={() => setPendingInvite(null)} className="flex-1 bg-gray-900 hover:bg-gray-800 text-gray-400 font-bold py-2.5 rounded-xl transition">Decline</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       </div>
     );
   }
