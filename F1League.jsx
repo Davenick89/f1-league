@@ -401,6 +401,19 @@ export default function F1League() {
     return () => clearInterval(interval);
   }, [currentRound]);
 
+  // Analytics: track screen views and league entry.
+  // These MUST live here (before any conditional returns) — hooks must be
+  // called unconditionally on every render (Rules of Hooks).
+  useEffect(() => {
+    if (!selectedGroup) return;
+    track('screen_view', { screen_name: currentView, league_id: selectedGroup.id });
+  }, [currentView, selectedGroup?.id]);
+
+  useEffect(() => {
+    if (!selectedGroup) return;
+    track('select_content', { content_type: 'league', item_id: selectedGroup.id, item_name: selectedGroup.name });
+  }, [selectedGroup?.id]);
+
   const loadUserGroups = async (userId) => {
     try {
       const q = query(collection(db, "groups"), where("members", "array-contains", userId));
@@ -852,18 +865,6 @@ export default function F1League() {
   }
 
   const race = F1_SCHEDULE_2026[currentRound - 1];
-
-  // Track screen views whenever the active tab changes
-  useEffect(() => {
-    if (!selectedGroup) return;
-    track('screen_view', { screen_name: currentView, league_id: selectedGroup.id });
-  }, [currentView, selectedGroup?.id]);
-
-  // Track league entry
-  useEffect(() => {
-    if (!selectedGroup) return;
-    track('select_content', { content_type: 'league', item_id: selectedGroup.id, item_name: selectedGroup.name });
-  }, [selectedGroup?.id]);
 
   return (
     <div className="min-h-screen bg-black text-white">
