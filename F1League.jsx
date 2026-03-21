@@ -538,20 +538,51 @@ export default function F1League() {
 
   const acceptInvite = async () => {
     if (!pendingInvite || !user) return;
+
+    console.log("🔵 [INVITE 1] 'Join League' clicked");
+    console.log(`🔵 [INVITE 2] League name   : ${pendingInvite.leagueName}`);
+    console.log(`🔵 [INVITE 3] League ID     : ${pendingInvite.leagueId}`);
+    console.log(`🔵 [INVITE 4] Invite code   : ${pendingInvite.code}`);
+    console.log(`🔵 [INVITE 5] User UID      : ${user.uid}`);
+    console.log(`🔵 [INVITE 6] Already member: ${pendingInvite.alreadyMember}`);
+
     try {
       if (!pendingInvite.alreadyMember) {
+        console.log("🔵 [INVITE 7] Writing arrayUnion to groups/" + pendingInvite.leagueId + "...");
         await updateDoc(doc(db, "groups", pendingInvite.leagueId), { members: arrayUnion(user.uid) });
+        console.log("✅ [INVITE 8] Firestore write succeeded — user added to members");
+
+        // Verify the write landed
+        const groupSnap = await getDoc(doc(db, "groups", pendingInvite.leagueId));
+        const currentMembers = groupSnap.data()?.members || [];
+        console.log(`✅ [INVITE 9] members array now (${currentMembers.length}):`, currentMembers);
+        console.log(`✅ [INVITE 10] Is ${user.uid} in members? → ${currentMembers.includes(user.uid)}`);
+
         const inviteRef = doc(db, "invites", pendingInvite.code);
         const inviteSnap = await getDoc(inviteRef);
         if (inviteSnap.exists()) {
-          await updateDoc(inviteRef, { usedCount: (inviteSnap.data().usedCount || 0) + 1 });
+          const newCount = (inviteSnap.data().usedCount || 0) + 1;
+          console.log(`🔵 [INVITE 11] Incrementing usedCount to ${newCount}...`);
+          await updateDoc(inviteRef, { usedCount: newCount });
+          console.log("✅ [INVITE 12] usedCount updated");
+        } else {
+          console.warn("⚠️  [INVITE 11] Invite doc not found — skipping usedCount increment");
         }
+
+        console.log("🔵 [INVITE 13] Re-fetching league list for user...");
         await loadUserGroups(user.uid);
+        console.log("✅ [INVITE 14] loadUserGroups complete — league selector should now show the new league");
+      } else {
+        console.log("ℹ️  [INVITE 7] Already a member — skipping Firestore write");
       }
-      setShowOnboarding(false); // don't send invite-joiners into the create-league wizard
+
+      setShowOnboarding(false);
       setPendingInvite(null);
+      console.log("✅ [INVITE 15] Modal closed — done");
     } catch (e) {
-      console.error("Error accepting invite:", e);
+      console.error("❌ [INVITE ERROR] Failed at some step:", e);
+      console.error("   message:", e.message);
+      console.error("   code   :", e.code);
     }
   };
 
