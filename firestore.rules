@@ -1,0 +1,137 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function groupData(groupId) {
+      return get(/databases/$(database)/documents/groups/$(groupId)).data;
+    }
+
+    function isMember(groupId) {
+      return isAuth() && uid() in groupData(groupId).members;
+    }
+
+    function isAdmin(groupId) {
+      return isAuth() && groupData(groupId).admin == uid();
+    }
+
+    // ─── Users ───────────────────────────────────────────────────────────────
+    // Any signed-in user can read profiles (needed for display names in
+    // leaderboards and member lists across all views).
+    // Only the user themselves can write their own profile.
+
+    match /users/{userId} {
+      allow read: if isAuth();
+      allow write: if isAuth() && uid() == userId;
+    }
+
+    // ─── Groups ──────────────────────────────────────────────────────────────
+
+    match /groups/{groupId} {
+      // Only members can read the group document
+      allow read: if isAuth() && uid() in resource.data.members;
+
+      // Any authenticated user can create a group — they must be the admin
+      // and seed themselves into the members array
+      allow create: if isAuth()
+        && request.resource.data.admin == uid()
+        && request.resource.data.members.hasAll([uid()])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 100;
+
+      // Update: admin can change anything.
+      // Non-admin: only allowed to add themselves to the members array (invite join).
+      allow update: if isAuth() && (
+        resource.data.admin == uid()
+        || (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
+          && request.resource.data.members.hasAll(resource.data.members)
+          && request.resource.data.members.size() == resource.data.members.size() + 1
+          && request.resource.data.members.hasAll([uid()])
+        )
+      );
+
+      // No client-side deletes — admin leaves by removing themselves from members
+      allow delete: if false;
+
+      // ── Predictions ──────────────────────────────────────────────────────
+      // Any member of the league can read all predictions (shown in comparison views).
+      // Only the owner (matching document ID) can write their own predictions,
+      // and they must be a current member.
+
+      match /predictions/{userId} {
+        allow read: if isMember(groupId);
+        allow write: if isAuth() && uid() == userId && isMember(groupId);
+      }
+
+      // ── Scores ───────────────────────────────────────────────────────────
+      // Scores are calculated and written by the group admin from the Results view.
+      // Cloud Functions (Admin SDK) also write scores and bypass these rules.
+
+      match /scores/{userId} {
+        allow read: if isMember(groupId);
+        allow write: if isAdmin(groupId);
+      }
+
+      // ── Results ──────────────────────────────────────────────────────────
+      // Race results (pole, P1-P3, sprint fields, R# finisher) are entered
+      // by the admin and readable by all members.
+
+      match /results/{roundId} {
+        allow read: if isMember(groupId);
+        allow write: if isAdmin(groupId);
+      }
+
+      // ── Race Status ──────────────────────────────────────────────────────
+      // Tracks whether a race weekend is OPEN / PAST / LOCKED.
+      // Admin manages; all members can read.
+
+      match /raceStatus/{roundId} {
+        allow read: if isMember(groupId);
+        allow write: if isAdmin(groupId);
+      }
+
+      // ── Audit Log ────────────────────────────────────────────────────────
+      // Only the admin can read the audit log.
+      // Any member can append their own prediction-save records.
+      // Updates and deletes are never allowed (immutable log).
+
+      match /auditLog/{logId} {
+        allow read: if isAdmin(groupId);
+        allow create: if isMember(groupId);
+        allow update, delete: if false;
+      }
+    }
+
+    // ─── Invites ─────────────────────────────────────────────────────────────
+
+    match /invites/{code} {
+      // Any authenticated user can read an invite (to display the accept modal)
+      allow read: if isAuth();
+
+      // Only the admin of the target league can create an invite for it
+      allow create: if isAuth()
+        && isAdmin(request.resource.data.leagueId)
+        && request.resource.data.createdBy == uid()
+        && request.resource.data.usedCount == 0;
+
+      // Any authenticated user can increment usedCount by exactly 1 (accepting invite)
+      allow update: if isAuth()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedCount'])
+        && request.resource.data.usedCount == resource.data.usedCount + 1;
+
+      allow delete: if false;
+    }
+
+  }
+}
