@@ -24,13 +24,55 @@ service cloud.firestore {
       return isAuth() && groupData(groupId).admin == uid();
     }
 
+    // ── FIX 1: Backend prediction lock using raceStatus ───────────────────
+    //
+    // WHY THIS WORKS WITHOUT RESTRUCTURING PREDICTIONS:
+    // Prediction documents are keyed by userId (not roundId), so the rule path
+    // /groups/{groupId}/predictions/{userId} carries no round information.
+    // Instead, the group document stores `currentOpenRound` (e.g. "round3"),
+    // which the admin updates via handleEndWeekend() when transitioning rounds.
+    // This function reads that field and checks the matching raceStatus doc.
+    //
+    // BACKWARD COMPAT: Groups created before this fix have no `currentOpenRound`
+    // field. If missing, the function returns true (allow) so existing leagues
+    // continue to work. Once admin runs handleEndWeekend() for the first time,
+    // `currentOpenRound` is set and enforcement kicks in.
+    //
+    // CALL COST: groupData() is cached within one rule evaluation, so this adds
+    // only 1-2 extra get/exists calls (well within the 10-call limit).
+
+    function isRaceOpen(groupId) {
+      let g = groupData(groupId);
+      // No currentOpenRound set — legacy group, allow writes for compatibility
+      return !('currentOpenRound' in g)
+        || (
+          exists(/databases/$(database)/documents/groups/$(groupId)/raceStatus/$(g.currentOpenRound))
+          && get(/databases/$(database)/documents/groups/$(groupId)/raceStatus/$(g.currentOpenRound)).data.get('isPredictionOpen', false) == true
+          // If overrideExpiresAt is present, enforce the 15-min window at the backend.
+          // overrideExpiresAt is a Firestore Timestamp set by handleUnlockPredictions.
+          && (
+            !('overrideExpiresAt' in get(/databases/$(database)/documents/groups/$(groupId)/raceStatus/$(g.currentOpenRound)).data)
+            || request.time < get(/databases/$(database)/documents/groups/$(groupId)/raceStatus/$(g.currentOpenRound)).data.overrideExpiresAt
+          )
+        );
+    }
+
     // ─── Users ───────────────────────────────────────────────────────────────
-    // Any signed-in user can read profiles (needed for display names in
-    // leaderboards and member lists across all views).
-    // Only the user themselves can write their own profile.
+    // FIX 2: Users can only read their own profile document.
+    //
+    // WHY: Previously any authenticated user could read any user doc, allowing
+    // email enumeration and profile data harvesting. Single-line rule change
+    // closes this.
+    //
+    // APP IMPACT: InvitesView and CalendarView load member nicknames via user
+    // docs. After this change, reads for other members' docs will fail — they
+    // are caught individually per-member (see InvitesView.loadMemberNicknames),
+    // so the member list falls back to "?" for members who haven't submitted
+    // predictions. Predictions and scores views are unaffected because they
+    // store nickname directly on the prediction document.
 
     match /users/{userId} {
-      allow read: if isAuth();
+      allow read: if isAuth() && uid() == userId;
       allow write: if isAuth() && uid() == userId;
     }
 
@@ -75,11 +117,25 @@ service cloud.firestore {
       allow delete: if false;
 
       // ── Predictions ──────────────────────────────────────────────────────
-      // Any member of the league can read all predictions (shown in comparison views).
-      // Only the owner (matching document ID) can write their own predictions,
-      // and they must be a current member.
+      // FIX 1 applied: writes also check isRaceOpen() so the prediction lock
+      // is enforced at the database level, not just in the UI.
+      //
+      // isRaceOpen() reads group.currentOpenRound then checks
+      // raceStatus/{currentOpenRound}.isPredictionOpen == true.
+      // Admin sets isPredictionOpen: false when closing a round via
+      // handleEndWeekend(), and sets it true when opening the next round.
 
       match /predictions/{userId} {
+        allow read: if isMember(groupId);
+        allow create, update: if isAuth() && uid() == userId && isMember(groupId) && isRaceOpen(groupId);
+        allow delete: if false;
+      }
+
+      // ── Season Predictions ────────────────────────────────────────────────
+      // Members can read all season predictions (shown in the season board).
+      // Only the owner can write their own prediction, and must be a member.
+
+      match /seasonPredictions/{userId} {
         allow read: if isMember(groupId);
         allow write: if isAuth() && uid() == userId && isMember(groupId);
       }
@@ -105,6 +161,8 @@ service cloud.firestore {
       // ── Race Status ──────────────────────────────────────────────────────
       // Tracks whether a race weekend is OPEN / PAST / LOCKED.
       // Admin manages; all members can read.
+      // isPredictionOpen: true  → predictions accepted
+      // isPredictionOpen: false → predictions blocked (backed by isRaceOpen())
 
       match /raceStatus/{roundId} {
         allow read: if isMember(groupId);
@@ -112,13 +170,15 @@ service cloud.firestore {
       }
 
       // ── Random Numbers ───────────────────────────────────────────────────
-      // Any member can read the random number (shown on the Predictions page).
-      // Any member can write it — the UI already prevents overwriting by hiding
-      // the button once a number exists (onSnapshot-driven).
+      // Only the group admin can generate the random number (create only).
+      // Once created, the document is immutable — no updates or deletes allowed.
+      // This prevents any member from changing the random slot after it's set,
+      // even via a direct API call bypassing the UI.
 
       match /randomNumbers/{roundId} {
         allow read: if isMember(groupId);
-        allow write: if isMember(groupId);
+        allow create: if isAdmin(groupId);
+        allow update, delete: if false;
       }
 
       // ── Audit Log ────────────────────────────────────────────────────────
@@ -129,6 +189,16 @@ service cloud.firestore {
       match /auditLog/{logId} {
         allow read: if isAdmin(groupId);
         allow create: if isMember(groupId);
+        allow update, delete: if false;
+      }
+
+      // ── System Logs ──────────────────────────────────────────────────────
+      // Written by handleEndWeekend and other admin-triggered operations.
+      // Admin-only read/write; immutable once created.
+
+      match /systemLogs/{logId} {
+        allow read: if isAdmin(groupId);
+        allow create: if isAdmin(groupId);
         allow update, delete: if false;
       }
     }

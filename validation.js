@@ -65,6 +65,22 @@ export function validateInviteCode(code) {
 // Returns { valid: true } or { valid: false, errors: string[] }
 export function validatePredictions(preds, isSprint) {
   const errors = [];
+
+  // Duplicate check: race podium P1/P2/P3 must all be different drivers
+  const racePodium = [preds.raceP1, preds.raceP2, preds.raceP3].filter(Boolean);
+  if (new Set(racePodium).size !== racePodium.length) {
+    errors.push('Duplicate drivers in race podium (P1/P2/P3 must be different)');
+  }
+
+  // Duplicate check: sprint podium
+  if (isSprint) {
+    const sprintPodium = [preds.sprintP1, preds.sprintP2, preds.sprintP3].filter(Boolean);
+    if (new Set(sprintPodium).size !== sprintPodium.length) {
+      errors.push('Duplicate drivers in sprint podium (must be different)');
+    }
+  }
+
+  // Validate each field is a known driver
   const fields = ['pole', 'raceP1', 'raceP2', 'raceP3', 'finisherPosition'];
   if (isSprint) fields.push('sprintQualPole', 'sprintP1', 'sprintP2', 'sprintP3');
 

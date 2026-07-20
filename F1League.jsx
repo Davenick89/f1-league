@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayRemove, arrayUnion, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayRemove, arrayUnion, serverTimestamp, onSnapshot, Timestamp } from 'firebase/firestore';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { getAnalytics, logEvent, isSupported as analyticsIsSupported } from 'firebase/analytics';
+import { scoreRace, rfDistance, rfPoints } from './scoring.js';
+import { validatePredictions } from './validation.js';
 import { Menu, X, LogOut, Plus, Users, Trophy, BarChart3, Settings, Copy, Check, Calendar, Lock, Edit, Info } from 'lucide-react';
 
 const firebaseConfig = {
@@ -47,39 +49,39 @@ try {
     // Show in-app notification toasts for foreground messages
     onMessage(messaging, (payload) => {
       const { title, body } = payload.notification ?? {};
-      if (title) console.info(`[FCM] ${title}: ${body}`);
+      // Foreground FCM messages handled silently — no toast needed
       // Foreground toast is handled in the Settings UI via a state update
     });
   }
 } catch (e) {
-  console.info('[FCM] Not supported in this browser:', e.message);
+  // FCM not supported in this browser — silent fallback
 }
 
 const F1_SCHEDULE_2026 = [
-  { round: 1,  name: "Australia",          location: "Melbourne",    date: "2026-03-08", fp1: "2026-03-06T09:30:00Z", fp2: "2026-03-06T13:00:00Z",                                       raceStart: "2026-03-08T04:00:00Z", isSprint: false },
-  { round: 2,  name: "China",              location: "Shanghai",     date: "2026-03-15", fp1: "2026-03-13T10:00:00Z", sprintQualStart: "2026-03-13T13:30:00Z",                            raceStart: "2026-03-15T07:00:00Z", isSprint: true  },
-  { round: 3,  name: "Japan",              location: "Suzuka",       date: "2026-03-29", fp1: "2026-03-27T10:00:00Z", fp2: "2026-03-27T13:30:00Z",                                       raceStart: "2026-03-29T05:00:00Z", isSprint: false },
-  { round: 4,  name: "Bahrain",            location: "Sakhir",       date: "2026-04-12", fp1: "2026-04-10T14:00:00Z", fp2: "2026-04-10T17:30:00Z",                                       raceStart: "2026-04-12T15:00:00Z", isSprint: false },
-  { round: 5,  name: "Saudi Arabia",       location: "Jeddah",       date: "2026-04-19", fp1: "2026-04-17T17:00:00Z", fp2: "2026-04-17T20:30:00Z",                                       raceStart: "2026-04-19T17:00:00Z", isSprint: false },
-  { round: 6,  name: "Miami",              location: "Miami",        date: "2026-05-03", fp1: "2026-05-01T13:00:00Z", sprintQualStart: "2026-05-01T17:00:00Z",                            raceStart: "2026-05-03T19:30:00Z", isSprint: true  },
-  { round: 7,  name: "Canada",             location: "Montreal",     date: "2026-05-24", fp1: "2026-05-22T14:00:00Z", sprintQualStart: "2026-05-22T18:00:00Z",                            raceStart: "2026-05-24T18:00:00Z", isSprint: true  },
-  { round: 8,  name: "Monaco",             location: "Monte Carlo",  date: "2026-06-07", fp1: "2026-06-05T14:00:00Z", fp2: "2026-06-05T17:30:00Z",                                       raceStart: "2026-06-07T13:00:00Z", isSprint: false },
-  { round: 9,  name: "Barcelona-Catalunya",location: "Barcelona",    date: "2026-06-14", fp1: "2026-06-12T13:00:00Z", fp2: "2026-06-12T16:30:00Z",                                       raceStart: "2026-06-14T13:00:00Z", isSprint: false },
-  { round: 10, name: "Austria",            location: "Spielberg",    date: "2026-06-28", fp1: "2026-06-26T14:00:00Z", fp2: "2026-06-26T17:30:00Z",                                       raceStart: "2026-06-28T13:00:00Z", isSprint: false },
-  { round: 11, name: "Great Britain",      location: "Silverstone",  date: "2026-07-05", fp1: "2026-07-03T13:00:00Z", sprintQualStart: "2026-07-03T17:00:00Z",                            raceStart: "2026-07-05T14:00:00Z", isSprint: true  },
-  { round: 12, name: "Belgium",            location: "Spa",          date: "2026-07-19", fp1: "2026-07-17T14:00:00Z", fp2: "2026-07-17T17:30:00Z",                                       raceStart: "2026-07-19T13:00:00Z", isSprint: false },
-  { round: 13, name: "Hungary",            location: "Budapest",     date: "2026-07-26", fp1: "2026-07-24T14:00:00Z", fp2: "2026-07-24T17:30:00Z",                                       raceStart: "2026-07-26T13:00:00Z", isSprint: false },
-  { round: 14, name: "Netherlands",        location: "Zandvoort",    date: "2026-08-23", fp1: "2026-08-21T14:00:00Z", sprintQualStart: "2026-08-21T18:00:00Z",                            raceStart: "2026-08-23T13:00:00Z", isSprint: true  },
-  { round: 15, name: "Italy",              location: "Monza",        date: "2026-09-06", fp1: "2026-09-04T13:00:00Z", fp2: "2026-09-04T16:30:00Z",                                       raceStart: "2026-09-06T13:00:00Z", isSprint: false },
-  { round: 16, name: "Spain",              location: "Madrid",       date: "2026-09-13", fp1: "2026-09-11T14:00:00Z", fp2: "2026-09-11T17:30:00Z",                                       raceStart: "2026-09-13T13:00:00Z", isSprint: false },
-  { round: 17, name: "Azerbaijan",         location: "Baku",         date: "2026-09-27", fp1: "2026-09-25T12:00:00Z", fp2: "2026-09-25T15:30:00Z",                                       raceStart: "2026-09-27T11:00:00Z", isSprint: false },
-  { round: 18, name: "Singapore",          location: "Singapore",    date: "2026-10-11", fp1: "2026-10-09T14:00:00Z", sprintQualStart: "2026-10-09T18:00:00Z",                            raceStart: "2026-10-11T12:00:00Z", isSprint: true  },
-  { round: 19, name: "United States",      location: "Austin",       date: "2026-10-25", fp1: "2026-10-23T12:00:00Z", fp2: "2026-10-23T15:30:00Z",                                       raceStart: "2026-10-25T19:00:00Z", isSprint: false },
-  { round: 20, name: "Mexico",             location: "Mexico City",  date: "2026-11-01", fp1: "2026-10-30T18:00:00Z", fp2: "2026-10-30T21:30:00Z",                                       raceStart: "2026-11-01T20:00:00Z", isSprint: false },
-  { round: 21, name: "Brazil",             location: "São Paulo",    date: "2026-11-08", fp1: "2026-11-06T11:00:00Z", fp2: "2026-11-06T14:30:00Z",                                       raceStart: "2026-11-08T17:00:00Z", isSprint: false },
-  { round: 22, name: "Las Vegas",          location: "Las Vegas",    date: "2026-11-21", fp1: "2026-11-19T22:00:00Z", fp2: "2026-11-20T01:30:00Z",                                       raceStart: "2026-11-22T06:00:00Z", isSprint: false },
-  { round: 23, name: "Qatar",              location: "Lusail",       date: "2026-11-29", fp1: "2026-11-27T15:00:00Z", fp2: "2026-11-27T18:30:00Z",                                       raceStart: "2026-11-29T16:00:00Z", isSprint: false },
-  { round: 24, name: "Abu Dhabi",          location: "Yas Island",   date: "2026-12-06", fp1: "2026-12-04T08:00:00Z", fp2: "2026-12-04T11:30:00Z",                                       raceStart: "2026-12-06T13:00:00Z", isSprint: false },
+  { round: 1,  name: "Australia",          location: "Melbourne",    date: "2026-03-08", fp1: "2026-03-06T09:30:00Z", fp2: "2026-03-06T13:00:00Z", qualStart: "2026-03-07T06:00:00Z", raceStart: "2026-03-08T04:00:00Z", isSprint: false },
+  { round: 2,  name: "China",              location: "Shanghai",     date: "2026-03-15", fp1: "2026-03-13T10:00:00Z", sprintQualStart: "2026-03-13T13:30:00Z",                                               raceStart: "2026-03-15T07:00:00Z", isSprint: true  },
+  { round: 3,  name: "Japan",              location: "Suzuka",       date: "2026-03-29", fp1: "2026-03-27T10:00:00Z", fp2: "2026-03-27T13:30:00Z", qualStart: "2026-03-28T07:00:00Z", raceStart: "2026-03-29T05:00:00Z", isSprint: false },
+  { round: 4,  name: "Bahrain",            location: "Sakhir",       date: "2026-04-12", fp1: "2026-04-10T14:00:00Z", fp2: "2026-04-10T17:30:00Z", qualStart: "2026-04-11T15:00:00Z", raceStart: "2026-04-12T15:00:00Z", isSprint: false },
+  { round: 5,  name: "Saudi Arabia",       location: "Jeddah",       date: "2026-04-19", fp1: "2026-04-17T17:00:00Z", fp2: "2026-04-17T20:30:00Z", qualStart: "2026-04-18T17:00:00Z", raceStart: "2026-04-19T17:00:00Z", isSprint: false },
+  { round: 6,  name: "Miami",              location: "Miami",        date: "2026-05-03", fp1: "2026-05-01T13:00:00Z", sprintQualStart: "2026-05-01T17:00:00Z",                                               raceStart: "2026-05-03T19:30:00Z", isSprint: true  },
+  { round: 7,  name: "Canada",             location: "Montreal",     date: "2026-05-24", fp1: "2026-05-22T14:00:00Z", sprintQualStart: "2026-05-22T18:00:00Z",                                               raceStart: "2026-05-24T18:00:00Z", isSprint: true  },
+  { round: 8,  name: "Monaco",             location: "Monte Carlo",  date: "2026-06-07", fp1: "2026-06-05T14:00:00Z", fp2: "2026-06-05T17:30:00Z", qualStart: "2026-06-06T13:00:00Z", raceStart: "2026-06-07T13:00:00Z", isSprint: false },
+  { round: 9,  name: "Barcelona-Catalunya",location: "Barcelona",    date: "2026-06-14", fp1: "2026-06-12T13:00:00Z", fp2: "2026-06-12T16:30:00Z", qualStart: "2026-06-13T13:00:00Z", raceStart: "2026-06-14T13:00:00Z", isSprint: false },
+  { round: 10, name: "Austria",            location: "Spielberg",    date: "2026-06-28", fp1: "2026-06-26T14:00:00Z", fp2: "2026-06-26T17:30:00Z", qualStart: "2026-06-27T13:00:00Z", raceStart: "2026-06-28T13:00:00Z", isSprint: false },
+  { round: 11, name: "Great Britain",      location: "Silverstone",  date: "2026-07-05", fp1: "2026-07-03T13:00:00Z", sprintQualStart: "2026-07-03T17:00:00Z",                                               raceStart: "2026-07-05T14:00:00Z", isSprint: true  },
+  { round: 12, name: "Belgium",            location: "Spa",          date: "2026-07-19", fp1: "2026-07-17T14:00:00Z", fp2: "2026-07-17T17:30:00Z", qualStart: "2026-07-18T13:00:00Z", raceStart: "2026-07-19T13:00:00Z", isSprint: false },
+  { round: 13, name: "Hungary",            location: "Budapest",     date: "2026-07-26", fp1: "2026-07-24T14:00:00Z", fp2: "2026-07-24T17:30:00Z", qualStart: "2026-07-25T13:00:00Z", raceStart: "2026-07-26T13:00:00Z", isSprint: false },
+  { round: 14, name: "Netherlands",        location: "Zandvoort",    date: "2026-08-23", fp1: "2026-08-21T14:00:00Z", sprintQualStart: "2026-08-21T18:00:00Z",                                               raceStart: "2026-08-23T13:00:00Z", isSprint: true  },
+  { round: 15, name: "Italy",              location: "Monza",        date: "2026-09-06", fp1: "2026-09-04T13:00:00Z", fp2: "2026-09-04T16:30:00Z", qualStart: "2026-09-05T13:00:00Z", raceStart: "2026-09-06T13:00:00Z", isSprint: false },
+  { round: 16, name: "Spain",              location: "Madrid",       date: "2026-09-13", fp1: "2026-09-11T14:00:00Z", fp2: "2026-09-11T17:30:00Z", qualStart: "2026-09-12T13:00:00Z", raceStart: "2026-09-13T13:00:00Z", isSprint: false },
+  { round: 17, name: "Azerbaijan",         location: "Baku",         date: "2026-09-27", fp1: "2026-09-25T12:00:00Z", fp2: "2026-09-25T15:30:00Z", qualStart: "2026-09-26T11:00:00Z", raceStart: "2026-09-27T11:00:00Z", isSprint: false },
+  { round: 18, name: "Singapore",          location: "Singapore",    date: "2026-10-11", fp1: "2026-10-09T14:00:00Z", sprintQualStart: "2026-10-09T18:00:00Z",                                               raceStart: "2026-10-11T12:00:00Z", isSprint: true  },
+  { round: 19, name: "United States",      location: "Austin",       date: "2026-10-25", fp1: "2026-10-23T12:00:00Z", fp2: "2026-10-23T15:30:00Z", qualStart: "2026-10-24T19:00:00Z", raceStart: "2026-10-25T19:00:00Z", isSprint: false },
+  { round: 20, name: "Mexico",             location: "Mexico City",  date: "2026-11-01", fp1: "2026-10-30T18:00:00Z", fp2: "2026-10-30T21:30:00Z", qualStart: "2026-10-31T20:00:00Z", raceStart: "2026-11-01T20:00:00Z", isSprint: false },
+  { round: 21, name: "Brazil",             location: "São Paulo",    date: "2026-11-08", fp1: "2026-11-06T11:00:00Z", fp2: "2026-11-06T14:30:00Z", qualStart: "2026-11-07T17:00:00Z", raceStart: "2026-11-08T17:00:00Z", isSprint: false },
+  { round: 22, name: "Las Vegas",          location: "Las Vegas",    date: "2026-11-21", fp1: "2026-11-19T22:00:00Z", fp2: "2026-11-20T01:30:00Z", qualStart: "2026-11-21T06:00:00Z", raceStart: "2026-11-22T06:00:00Z", isSprint: false },
+  { round: 23, name: "Qatar",              location: "Lusail",       date: "2026-11-29", fp1: "2026-11-27T15:00:00Z", fp2: "2026-11-27T18:30:00Z", qualStart: "2026-11-28T14:00:00Z", raceStart: "2026-11-29T16:00:00Z", isSprint: false },
+  { round: 24, name: "Abu Dhabi",          location: "Yas Island",   date: "2026-12-06", fp1: "2026-12-04T08:00:00Z", fp2: "2026-12-04T11:30:00Z", qualStart: "2026-12-05T13:00:00Z", raceStart: "2026-12-06T13:00:00Z", isSprint: false },
 ];
 
 const F1_DRIVERS = [
@@ -96,38 +98,6 @@ const F1_TEAMS = [
   "Aston Martin", "Alpine", "Haas", "Racing Bulls", "Audi", "Cadillac"
 ];
 
-// Grid order for closest finisher scoring (approximate 2026 championship order)
-const F1_GRID_ORDER = [
-  "Lando Norris",      // 0
-  "Oscar Piastri",     // 1
-  "George Russell",    // 2
-  "Kimi Antonelli",    // 3
-  "Charles Leclerc",   // 4
-  "Lewis Hamilton",    // 5
-  "Max Verstappen",    // 6
-  "Isack Hadjar",      // 7
-  "Carlos Sainz",      // 8
-  "Alexander Albon",   // 9
-  "Fernando Alonso",   // 10
-  "Lance Stroll",      // 11
-  "Pierre Gasly",      // 12
-  "Franco Colapinto",  // 13
-  "Oliver Bearman",    // 14
-  "Esteban Ocon",      // 15
-  "Liam Lawson",       // 16
-  "Arvid Lindblad",    // 17
-  "Nico Hulkenberg",   // 18
-  "Gabriel Bortoleto", // 19
-];
-
-function getClosestFinisher(predicted, actual) {
-  if (!predicted || !actual) return 0;
-  if (predicted === actual) return 2;
-  const predIdx = F1_GRID_ORDER.indexOf(predicted);
-  const actualIdx = F1_GRID_ORDER.indexOf(actual);
-  if (predIdx === -1 || actualIdx === -1) return 0;
-  return Math.abs(predIdx - actualIdx) <= 2 ? 1 : 0;
-}
 
 function getCurrentRound() {
   const now = new Date();
@@ -143,17 +113,36 @@ function getCurrentRound() {
 
 // Returns the prediction lock time for a race:
 // - Sprint weekends: 30 min before Sprint Qualifying
-// - Normal weekends: 30 min before FP2
+// - Normal weekends: 30 min before Qualifying
 // Falls back to 5h before race start if session times are missing.
-function getPredictionLockTime(race) {
+// offsetMins: minutes before qualifying session to lock predictions.
+// Defaults to 30; overridden per-league via group.predictionLockOffsetMins.
+// apiSessionStr: validated qualifying start from Jolpica API — overrides hardcoded qualStart
+// when present (more accurate for mid-season schedule changes).
+function getPredictionLockTime(race, offsetMins = 60, apiSessionStr = null) {
   if (!race) return null;
-  const sessionStr = race.isSprint ? race.sprintQualStart : race.fp2;
-  if (sessionStr) return new Date(new Date(sessionStr).getTime() - 30 * 60 * 1000);
+  // API time wins when available; hardcoded is the fallback.
+  const sessionStr = apiSessionStr ?? (race.isSprint ? race.sprintQualStart : race.qualStart);
+  if (sessionStr) return new Date(new Date(sessionStr).getTime() - offsetMins * 60 * 1000);
   return race.raceStart ? new Date(new Date(race.raceStart).getTime() - 5 * 60 * 60 * 1000) : null;
 }
 
-function getTimeUntilLock(race) {
-  const lockTime = getPredictionLockTime(race);
+// Format a Date as IST with a UTC reference, e.g.
+// "Sat, 7 Jun · 6:30 PM IST (13:00 UTC)"
+function formatLockTimeIST(date) {
+  if (!date) return null;
+  const ist = date.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    weekday: 'short', day: 'numeric', month: 'short',
+    hour: '2-digit', minute: '2-digit', hour12: true,
+  }).replace(/,\s*/g, ', ');
+  const utcH = String(date.getUTCHours()).padStart(2, '0');
+  const utcM = String(date.getUTCMinutes()).padStart(2, '0');
+  return `${ist} IST (${utcH}:${utcM} UTC)`;
+}
+
+function getTimeUntilLock(race, offsetMins = 60) {
+  const lockTime = getPredictionLockTime(race, offsetMins);
   if (!lockTime) return "N/A";
   const diff = lockTime - new Date();
   if (diff <= 0) return "LOCKED";
@@ -165,9 +154,19 @@ function getTimeUntilLock(race) {
   return `${minutes}m`;
 }
 
-function isEditLocked(race) {
-  const lockTime = getPredictionLockTime(race);
+function isEditLocked(race, offsetMins = 60) {
+  const lockTime = getPredictionLockTime(race, offsetMins);
   return lockTime ? new Date() >= lockTime : false;
+}
+
+// Returns the Monday 00:00:00 UTC of the race week — predictions open at this point.
+// Sun race (day=0): daysSinceMonday=6  Mon race (day=1): daysSinceMonday=0  Sat (day=6): daysSinceMonday=5
+function getPredictionOpenTime(race) {
+  if (!race?.date) return null;
+  const raceDate = new Date(race.date + 'T00:00:00Z');
+  const dayOfWeek = raceDate.getUTCDay();
+  const daysSinceMonday = (dayOfWeek + 6) % 7;
+  return new Date(raceDate.getTime() - daysSinceMonday * 24 * 60 * 60 * 1000);
 }
 
 // Returns display name: custom nickname > first letter of email > "?"
@@ -180,14 +179,13 @@ function getDisplayName(nickname, googleFirstName, email) {
 
 // SCHEDULE SYNC — runs on app load, checks Jolpica API against hardcoded schedule
 async function syncScheduleWithAPI() {
-  console.log('[Schedule Sync] Starting...');
   const TOLERANCE_MS = 60 * 60 * 1000; // 1-hour tolerance
   try {
     const res = await fetch('https://api.jolpi.ca/ergast/f1/2026.json');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const races = data?.MRData?.RaceTable?.Races;
-    if (!races?.length) { console.warn('[Schedule Sync] No races returned'); return; }
+    if (!races?.length) return;
 
     races.forEach(apiRace => {
       const round = parseInt(apiRace.round);
@@ -198,10 +196,9 @@ async function syncScheduleWithAPI() {
       const diffMs = Math.abs(apiTime - hardcodedTime);
       if (diffMs > TOLERANCE_MS) {
         const diffH = Math.round(diffMs / (1000 * 60 * 60));
-        console.warn(`[Schedule Sync] R${round} ${hardcoded.name}: timing differs by ~${diffH}h (API: ${apiTime.toISOString()}, hardcoded: ${hardcodedTime.toISOString()})`);
+        console.error(`[Schedule Sync] R${round} ${hardcoded.name}: timing differs by ~${diffH}h — update F1_SCHEDULE_2026 (API: ${apiTime.toISOString()}, hardcoded: ${hardcodedTime.toISOString()})`);
       }
     });
-    console.log(`[Schedule Sync] Complete — checked ${races.length} races`);
   } catch (err) {
     console.error('[Schedule Sync] Error:', err.message);
   }
@@ -395,11 +392,12 @@ export default function F1League() {
   useEffect(() => {
     const race = F1_SCHEDULE_2026[currentRound - 1];
     if (!race) return;
-    const updateCountdown = () => setCountdown(getTimeUntilLock(race));
+    const offsetMins = selectedGroup?.predictionLockOffsetMins ?? 60;
+    const updateCountdown = () => setCountdown(getTimeUntilLock(race, offsetMins));
     updateCountdown();
     const interval = setInterval(updateCountdown, 1000);
     return () => clearInterval(interval);
-  }, [currentRound]);
+  }, [currentRound, selectedGroup?.predictionLockOffsetMins]);
 
   // Analytics: track screen views and league entry.
   // These MUST live here (before any conditional returns) — hooks must be
@@ -510,7 +508,14 @@ export default function F1League() {
         name: groupName,
         admin: user.uid,
         members: [user.uid],
+        currentOpenRound: "round1",
         createdTimestamp: serverTimestamp()
+      });
+      // Seed the first race status so isRaceOpen() works immediately
+      await setDoc(doc(db, `groups/${groupId}/raceStatus`, "round1"), {
+        status: 'CURRENT',
+        isPredictionOpen: true,
+        openedAt: new Date().toISOString()
       });
       track('league_created', { league_name: groupName.trim() });
       setGroupName("");
@@ -573,52 +578,24 @@ export default function F1League() {
 
   const acceptInvite = async () => {
     if (!pendingInvite || !user) return;
-
-    console.log("🔵 [INVITE 1] 'Join League' clicked");
-    console.log(`🔵 [INVITE 2] League name   : ${pendingInvite.leagueName}`);
-    console.log(`🔵 [INVITE 3] League ID     : ${pendingInvite.leagueId}`);
-    console.log(`🔵 [INVITE 4] Invite code   : ${pendingInvite.code}`);
-    console.log(`🔵 [INVITE 5] User UID      : ${user.uid}`);
-    console.log(`🔵 [INVITE 6] Already member: ${pendingInvite.alreadyMember}`);
-
     try {
       if (!pendingInvite.alreadyMember) {
-        console.log("🔵 [INVITE 7] Writing arrayUnion to groups/" + pendingInvite.leagueId + "...");
         await updateDoc(doc(db, "groups", pendingInvite.leagueId), { members: arrayUnion(user.uid) });
-        console.log("✅ [INVITE 8] Firestore write succeeded — user added to members");
-
-        // Verify the write landed
-        const groupSnap = await getDoc(doc(db, "groups", pendingInvite.leagueId));
-        const currentMembers = groupSnap.data()?.members || [];
-        console.log(`✅ [INVITE 9] members array now (${currentMembers.length}):`, currentMembers);
-        console.log(`✅ [INVITE 10] Is ${user.uid} in members? → ${currentMembers.includes(user.uid)}`);
 
         const inviteRef = doc(db, "invites", pendingInvite.code);
         const inviteSnap = await getDoc(inviteRef);
         if (inviteSnap.exists()) {
-          const newCount = (inviteSnap.data().usedCount || 0) + 1;
-          console.log(`🔵 [INVITE 11] Incrementing usedCount to ${newCount}...`);
-          await updateDoc(inviteRef, { usedCount: newCount });
-          console.log("✅ [INVITE 12] usedCount updated");
-        } else {
-          console.warn("⚠️  [INVITE 11] Invite doc not found — skipping usedCount increment");
+          await updateDoc(inviteRef, { usedCount: (inviteSnap.data().usedCount || 0) + 1 });
         }
 
-        console.log("🔵 [INVITE 13] Re-fetching league list for user...");
         await loadUserGroups(user.uid);
-        console.log("✅ [INVITE 14] loadUserGroups complete — league selector should now show the new league");
-      } else {
-        console.log("ℹ️  [INVITE 7] Already a member — skipping Firestore write");
       }
 
       track('invite_accepted', { league_id: pendingInvite.leagueId, league_name: pendingInvite.leagueName });
       setShowOnboarding(false);
       setPendingInvite(null);
-      console.log("✅ [INVITE 15] Modal closed — done");
     } catch (e) {
-      console.error("❌ [INVITE ERROR] Failed at some step:", e);
-      console.error("   message:", e.message);
-      console.error("   code   :", e.code);
+      console.error("Error accepting invite:", e);
     }
   };
 
@@ -1120,7 +1097,7 @@ function LandingPage({ handleGoogleSignIn }) {
             {rulesTab === 'normal' && (
               <div>
                 <h3 className="font-black text-base mb-1" style={{ fontFamily: 'Orbitron', color: '#DC0000' }}>Normal Race Weekend</h3>
-                <p className="text-gray-500 text-xs mb-6">Lock: 30 minutes before FP2. Submit 5 predictions:</p>
+                <p className="text-gray-500 text-xs mb-6">Opens Monday of race week · Locks 1 hour before Qualifying. Submit 5 predictions:</p>
                 <div className="space-y-2">
                   {[['Pole Position','Who starts P1 on the grid?','+1'],['Race Winner (P1)','Who takes the chequered flag?','+1'],['2nd Place (P2)','2nd on the podium','+1'],['3rd Place (P3)','3rd on the podium','+1'],['R# Random Finisher','Mystery wildcard (see R# tab)','+1 or +2']].map(([n,d,p]) => (
                     <div key={n} className="flex items-center gap-4 bg-gray-900 rounded-xl p-3">
@@ -1137,7 +1114,7 @@ function LandingPage({ handleGoogleSignIn }) {
             {rulesTab === 'sprint' && (
               <div>
                 <h3 className="font-black text-base mb-1" style={{ fontFamily: 'Orbitron', color: '#DC0000' }}>Sprint Race Weekend</h3>
-                <p className="text-gray-500 text-xs mb-6">Lock: 30 minutes before Sprint Qualifying. Submit 9 predictions:</p>
+                <p className="text-gray-500 text-xs mb-6">Opens Monday of race week · Locks 1 hour before Sprint Qualifying. Submit 9 predictions:</p>
                 <div className="space-y-2">
                   {[['Pole Position','Grand Prix qualifying pole','+1'],['Sprint Quali Pole','Sprint shootout top spot','+1'],['Sprint P1','Sprint race winner','+1'],['Sprint P2 / P3','Sprint podium positions','+1 each'],['Race P1 / P2 / P3','Grand Prix podium','+1 each'],['R# Random Finisher','Mystery wildcard','+1 or +2']].map(([n,d,p]) => (
                     <div key={n} className="flex items-center gap-4 bg-gray-900 rounded-xl p-3">
@@ -1259,7 +1236,14 @@ function AdminWizard({ user, onComplete }) {
         name: leagueName.trim(),
         admin: user.uid,
         members: [user.uid],
+        currentOpenRound: "round1",
         createdTimestamp: serverTimestamp(),
+      });
+      // Seed the first race status so isRaceOpen() works immediately
+      await setDoc(doc(db, `groups/${groupId}/raceStatus`, "round1"), {
+        status: 'CURRENT',
+        isPredictionOpen: true,
+        openedAt: new Date().toISOString()
       });
       const group = { id: groupId, name: leagueName.trim(), admin: user.uid, members: [user.uid] };
       setCreatedGroup(group);
@@ -1585,7 +1569,8 @@ function PlayerSummaryModal({ group, playerId, playerName, currentRound, onClose
 
           const predictions = fields.map(({ key, label, scoreKey }) => {
             const predicted = roundPred[key];
-            const actual = results[scoreKey === 'randomFinisher' ? 'finisherAtPosition' : key];
+            const rawActual = results[scoreKey === 'randomFinisher' ? 'finisherAtPosition' : key];
+            const actual = rawActual === 'NC' ? 'Not Classified' : rawActual;
             const fieldPts = bd[scoreKey || key] || 0;
             if (!predicted) return null;
             totalPreds++;
@@ -1658,9 +1643,15 @@ function LeaderboardView({ group, currentRound, user }) {
     const unsubscribe = onSnapshot(collection(db, `groups/${group.id}/scores`), async (snapshot) => {
       try {
         const leaderboardData = await Promise.all(snapshot.docs.map(async (scoreDoc) => {
-          const userRef = doc(db, "users", scoreDoc.id);
-          const userDoc = await getDoc(userRef);
-          const nickname = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.googleFirstName, userDoc.data()?.email);
+          // Read nickname from predictions doc (readable by all members) instead of
+          // users doc (restricted to own doc only after FIX 2)
+          let nickname = "?";
+          try {
+            const predDoc = await getDoc(doc(db, `groups/${group.id}/predictions`, scoreDoc.id));
+            nickname = predDoc.data()?.nickname || "?";
+          } catch {
+            // Leave as "?"
+          }
           let totalPoints = 0;
           for (let i = 1; i <= currentRound; i++) {
             totalPoints += scoreDoc.data()[`round${i}`]?.totalPoints || 0;
@@ -1783,7 +1774,7 @@ const FIELD_HELP = {
       ['❌ Not the closest', '0 pts'],
     ],
     example: { predict: 'Carlos Sainz (you pick him)', result: 'R# = P10. Sainz finishes P9 (1 away). No one else is closer.', earned: '+1' },
-    note: 'Driver must start the race (DNS = 0 pts). Ties split the +1 — only one player can earn +2.',
+    note: 'A retiring driver still scores normally if they earned an official classified finish (most DNFs do). Only DNS (did not start) or NC (not classified — completed <90% of race distance) score 0. Ties split the +1 — only one player can earn +2.',
   },
 };
 
@@ -1880,6 +1871,7 @@ function InfoBtn({ fieldKey, onOpen }) {
 
 // PREDICTION VIEW - COMPLETE REBUILD
 function PredictionView({ group, race, currentRound, countdown, user }) {
+  const { apiData } = useF1ApiSchedule(2026);
   const [predictions, setPredictions] = useState({
     pole: "",
     sprintQualPole: "",
@@ -1900,6 +1892,98 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
   const [allPredictions, setAllPredictions] = useState([]);
   const [allResults, setAllResults] = useState(null);
   const [memberNicknames, setMemberNicknames] = useState({});
+  const [raceStatus, setRaceStatus] = useState(null);
+  const [overrideSecsLeft, setOverrideSecsLeft] = useState(null);
+
+  const isAdmin = group?.admin === user?.uid;
+
+  // Subscribe to raceStatus — used to let admin override the time-based lock
+  useEffect(() => {
+    if (!group) return;
+    const unsub = onSnapshot(
+      doc(db, `groups/${group.id}/raceStatus`, `round${currentRound}`),
+      (snap) => setRaceStatus(snap.exists() ? snap.data() : {})
+    );
+    return () => unsub();
+  }, [group, currentRound]);
+
+  const OVERRIDE_WINDOW_MINS = 15;
+
+  // Live countdown for the override window + auto-lock when it expires
+  useEffect(() => {
+    const expiresRaw = raceStatus?.overrideExpiresAt;
+    if (!raceStatus?.isPredictionOpen || !expiresRaw) {
+      setOverrideSecsLeft(null);
+      return;
+    }
+    const expiresMs = expiresRaw?.toDate ? expiresRaw.toDate().getTime() : new Date(expiresRaw).getTime();
+
+    const tick = async () => {
+      const secsLeft = Math.max(0, Math.round((expiresMs - Date.now()) / 1000));
+      setOverrideSecsLeft(secsLeft);
+      if (secsLeft === 0 && isAdmin) {
+        // Auto-lock Firestore when the window expires — only the admin writes it
+        try {
+          await setDoc(doc(db, `groups/${group.id}/raceStatus`, `round${currentRound}`), {
+            isPredictionOpen: false,
+            autoLockedAt: new Date().toISOString(),
+          }, { merge: true });
+        } catch (err) {
+          console.error("Auto-lock failed:", err);
+        }
+      }
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [raceStatus?.isPredictionOpen, raceStatus?.overrideExpiresAt, isAdmin, group, currentRound]);
+
+  const handleUnlockPredictions = async () => {
+    try {
+      const nowIso = new Date().toISOString();
+      const expiresAt = Timestamp.fromDate(new Date(Date.now() + OVERRIDE_WINDOW_MINS * 60 * 1000));
+      await setDoc(doc(db, `groups/${group.id}/raceStatus`, `round${currentRound}`), {
+        status: 'CURRENT',
+        isPredictionOpen: true,
+        openedAt: nowIso,
+        openedManuallyBy: user.uid,
+        overrideExpiresAt: expiresAt,   // enforced by Firestore rule + frontend countdown
+      }, { merge: true });
+      await updateDoc(doc(db, "groups", group.id), {
+        currentOpenRound: `round${currentRound}`,
+      });
+      // Audit: log admin unlock so there's a full record of when predictions were re-opened
+      await setDoc(doc(collection(db, `groups/${group.id}/auditLog`)), {
+        userId: user.uid,
+        nickname: user.displayName || user.email || user.uid,
+        round: currentRound,
+        raceName: race?.name || `Round ${currentRound}`,
+        action: "admin_unlock",
+        timestamp: serverTimestamp(),
+        timestampIso: nowIso,
+      });
+      setMessage("✅ Predictions opened");
+      setTimeout(() => setMessage(""), 4000);
+    } catch (err) {
+      console.error("Unlock error:", err);
+      setMessage("❌ Error unlocking");
+    }
+  };
+
+  const handleLockPredictions = async () => {
+    try {
+      await setDoc(doc(db, `groups/${group.id}/raceStatus`, `round${currentRound}`), {
+        isPredictionOpen: false,
+        lockedAt: new Date().toISOString(),
+        lockedManuallyBy: user.uid
+      }, { merge: true });
+      setMessage("🔒 Predictions locked");
+      setTimeout(() => setMessage(""), 3000);
+    } catch (err) {
+      console.error("Lock error:", err);
+      setMessage("❌ Error locking");
+    }
+  };
 
   // Load member nicknames first
   useEffect(() => {
@@ -1907,17 +1991,14 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
 
     const loadNicknames = async () => {
       const nicknames = {};
-      if (group.members) {
-        for (const memberId of group.members) {
-          try {
-            const userRef = doc(db, "users", memberId);
-            const userDoc = await getDoc(userRef);
-            nicknames[memberId] = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.googleFirstName, userDoc.data()?.email);
-          } catch (e) {
-            nicknames[memberId] = "Unknown";
-          }
+      await Promise.all((group.members || []).map(async memberId => {
+        try {
+          const predDoc = await getDoc(doc(db, `groups/${group.id}/predictions`, memberId));
+          nicknames[memberId] = predDoc.data()?.nickname || "?";
+        } catch {
+          nicknames[memberId] = "?";
         }
-      }
+      }));
       setMemberNicknames(nicknames);
     };
 
@@ -2038,6 +2119,13 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
 
   const handleSavePredictions = async () => {
     try {
+      const validation = validatePredictions(predictions, !!race?.isSprint);
+      if (!validation.valid) {
+        setMessage(`⚠️ ${validation.errors[0]}`);
+        setTimeout(() => setMessage(""), 4000);
+        return;
+      }
+
       if (!randomNumber) {
         setMessage("⚠️ Need random number first");
         setTimeout(() => setMessage(""), 3000);
@@ -2053,20 +2141,19 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
         nickname: userNickname,
         [`round${currentRound}`]: {
           ...predictions,
-          randomNumber: randomNumber,
           lastEditTime: new Date().toISOString(),
           createdAt: serverTimestamp()
         }
       }, { merge: true });
 
-      // Audit trail — write a record every time predictions are saved/edited
+      // Audit trail — distinguish first submission from subsequent edits
       const raceName = race?.name || `Round ${currentRound}`;
       await setDoc(doc(collection(db, `groups/${group.id}/auditLog`)), {
         userId: user.uid,
         nickname: userNickname,
         round: currentRound,
         raceName,
-        action: "prediction_save",
+        action: userHasPredictions ? "prediction_edit" : "prediction_submit",
         predictions: { ...predictions },
         timestamp: serverTimestamp(),
         timestampIso: new Date().toISOString(),
@@ -2112,15 +2199,14 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
     const getRfDistanceForPlayer = (p) => {
       const posStr = allResults.rPredFinishPositions?.[p.userId];
       if (posStr) {
-        if (posStr === "DNS" || posStr === "DNF") return Infinity;
+        // DNS (did not start) / NC (not classified — <90% race distance, no official
+        // position) score 0. A DNF that still earned an official classified position
+        // (e.g. "Retired, Classified P14") is entered as that position and scored normally.
+        if (posStr === "DNS" || posStr === "NC") return Infinity;
         const pos = parseInt(posStr.replace("P", ""), 10);
         return isNaN(pos) || !randomNumber ? Infinity : Math.abs(pos - randomNumber);
       }
-      // Fallback: F1_GRID_ORDER distance vs finisherAtPosition
-      const actualIdx = allResults.finisherAtPosition ? F1_GRID_ORDER.indexOf(allResults.finisherAtPosition) : -1;
-      const idx = p.finisherPosition ? F1_GRID_ORDER.indexOf(p.finisherPosition) : -1;
-      return (p.finisherPosition && allResults.finisherAtPosition && idx !== -1 && actualIdx !== -1)
-        ? Math.abs(idx - actualIdx) : Infinity;
+      return Infinity; // no finish position data — 0 pts (F1_GRID_ORDER fallback removed)
     };
     const distances = allPredictions.map(getRfDistanceForPlayer).filter(d => d !== Infinity);
     const minDistance = distances.length > 0 ? Math.min(...distances) : Infinity;
@@ -2132,7 +2218,40 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
     return points;
   };
 
-  const editLocked = isEditLocked(race);
+  // ── Lock logic ──────────────────────────────────────────────────────────
+  // Prefer Jolpica API qualifying time over hardcoded — more accurate for the
+  // actual 2026 schedule. Apply same 10-day sanity check used in ResultsView
+  // to catch round-number mismatches (e.g. if a race was cancelled/rescheduled).
+  const lockOffsetMins = group?.predictionLockOffsetMins ?? 60;
+
+  const _apiRound = apiData?.[currentRound];
+  const _hardcodedSessionMs = race
+    ? new Date(race.isSprint ? race.sprintQualStart : (race.qualStart ?? race.raceStart)).getTime()
+    : null;
+  const _apiSessionStr = race?.isSprint
+    ? _apiRound?.sprintQualifyingStart
+    : _apiRound?.qualifyingStart;
+  const _apiSessionMs = _apiSessionStr ? new Date(_apiSessionStr).getTime() : null;
+  const _apiSessionValid = _hardcodedSessionMs && _apiSessionMs
+    ? Math.abs(_apiSessionMs - _hardcodedSessionMs) < 10 * 24 * 60 * 60 * 1000
+    : false;
+  const validatedApiSessionStr = _apiSessionValid ? _apiSessionStr : null;
+
+  const lockTime = getPredictionLockTime(race, lockOffsetMins, validatedApiSessionStr);
+  const timeLocked = lockTime ? Date.now() >= lockTime.getTime() : false;
+  const adminOverrideOpen = raceStatus?.isPredictionOpen === true;
+  const adminForcedLock = raceStatus?.isPredictionOpen === false;
+  // Override window: if overrideExpiresAt is set, the override expires when the countdown hits 0
+  const overrideWindowActive = adminOverrideOpen && overrideSecsLeft !== null;
+  const overrideWindowExpired = overrideWindowActive && overrideSecsLeft <= 0;
+  const effectiveAdminOverrideOpen = adminOverrideOpen && !overrideWindowExpired;
+  const editLocked = adminForcedLock || overrideWindowExpired || (timeLocked && !effectiveAdminOverrideOpen);
+
+  // Predictions open on Monday of race week. Before that, the form is visible but saving is blocked.
+  const predOpenTime = getPredictionOpenTime(race);
+  const isNotYetOpen = predOpenTime && !adminOverrideOpen
+    ? Date.now() < predOpenTime.getTime()
+    : false;
 
   // Get available drivers for each position (excluding OTHER selected positions)
   const getAvailableForP1 = () => {
@@ -2206,12 +2325,85 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
               <Edit size={16} /> {isEditing ? "Cancel" : "Edit"}
             </button>
           )}
-          {editLocked && userHasPredictions && (
-            <div className="px-3 py-1 bg-gray-700 rounded text-sm font-bold flex items-center gap-2">
-              <Lock size={16} /> LOCKED
+          {editLocked && (
+            <div className="px-3 py-1 bg-gray-700 rounded text-sm font-bold flex items-center gap-2 text-gray-400">
+              <Lock size={14} /> LOCKED
             </div>
           )}
         </div>
+
+        {/* ── Pre-open banner: before Monday of race week ── */}
+        {isNotYetOpen && (
+          <div className="flex items-center gap-3 bg-gray-800/80 border border-gray-600/50 rounded-lg px-4 py-3 mb-5">
+            <span className="text-xl shrink-0">🗓️</span>
+            <div className="flex-1">
+              <p className="text-gray-300 font-bold text-sm tracking-wide">PREDICTIONS NOT YET OPEN</p>
+              <p className="text-gray-500 text-xs mt-0.5">
+                Opens{' '}
+                <span className="text-gray-200 font-semibold">
+                  {predOpenTime
+                    ? predOpenTime.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'UTC' })
+                    : 'Monday of race week'}
+                </span>{' '}— you can fill in your picks now but won't be able to save until then.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ── Prediction status banner — always visible ── */}
+        {raceStatus !== null && (
+          editLocked ? (
+            <div className="flex items-center gap-3 bg-red-950/60 border border-red-700/50 rounded-lg px-4 py-3 mb-5">
+              <Lock size={16} className="text-red-400 shrink-0" />
+              <div className="flex-1">
+                <p className="text-red-400 font-bold text-sm tracking-wide">PREDICTIONS LOCKED</p>
+                <p className="text-red-300/70 text-xs mt-0.5">
+                  {adminForcedLock
+                    ? "Locked by admin — contact the league admin if you need access."
+                    : "The prediction window for this race has closed."}
+                </p>
+              </div>
+              {isAdmin && (
+                <button
+                  onClick={handleUnlockPredictions}
+                  className="shrink-0 px-3 py-1 bg-green-700 hover:bg-green-600 rounded text-xs font-bold text-white transition-colors"
+                >
+                  🔓 Unlock
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 bg-green-950/50 border border-green-700/40 rounded-lg px-4 py-3 mb-5">
+              <div className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse shrink-0" />
+              <div className="flex-1">
+                <p className="text-green-400 font-bold text-sm tracking-wide">PREDICTIONS OPEN</p>
+                <p className="text-green-300/60 text-xs mt-0.5">
+                  {overrideWindowActive ? (
+                    <>
+                      Override window —{' '}
+                      <span className="text-yellow-300 font-bold">
+                        {Math.floor(overrideSecsLeft / 60)}:{String(overrideSecsLeft % 60).padStart(2, '0')} remaining
+                      </span>
+                      {' '}then auto-locks
+                    </>
+                  ) : lockTime ? (
+                    <>Cut-off: <span className="text-green-200 font-semibold">{formatLockTimeIST(lockTime)}</span></>
+                  ) : (
+                    "Submit before the lock time."
+                  )}
+                </p>
+              </div>
+              {isAdmin && timeLocked && !overrideWindowActive && (
+                <button
+                  onClick={handleLockPredictions}
+                  className="shrink-0 px-3 py-1 bg-red-800 hover:bg-red-700 rounded text-xs font-bold text-white transition-colors"
+                >
+                  🔒 Lock
+                </button>
+              )}
+            </div>
+          )
+        )}
 
         {userHasPredictions && !isEditing && !editLocked ? (
           <p className="text-gray-400 text-sm">Saved. Click Edit to change.</p>
@@ -2292,7 +2484,13 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
                 </select>
               </div>
             </div>
-            <button onClick={handleSavePredictions} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg">SAVE</button>
+            <button
+              onClick={handleSavePredictions}
+              disabled={isNotYetOpen}
+              className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg transition-colors"
+            >
+              {isNotYetOpen ? '🗓️ Opens Monday' : 'SAVE PREDICTIONS'}
+            </button>
           </>
         ) : null}
 
@@ -2311,15 +2509,11 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
           const getDist = (p) => {
             const posStr = allResults?.rPredFinishPositions?.[p.userId];
             if (posStr) {
-              if (posStr === "DNS" || posStr === "DNF") return Infinity;
+              if (posStr === "DNS" || posStr === "NC") return Infinity;
               const pos = parseInt(posStr.replace("P", ""), 10);
               return isNaN(pos) || !randomNumber ? Infinity : Math.abs(pos - randomNumber);
             }
-            // Fallback: F1_GRID_ORDER distance vs finisherAtPosition
-            const actualIdx = allResults?.finisherAtPosition ? F1_GRID_ORDER.indexOf(allResults.finisherAtPosition) : -1;
-            const idx = p.finisherPosition ? F1_GRID_ORDER.indexOf(p.finisherPosition) : -1;
-            return (p.finisherPosition && allResults?.finisherAtPosition && idx !== -1 && actualIdx !== -1)
-              ? Math.abs(idx - actualIdx) : Infinity;
+            return Infinity; // no finish position data — 0 pts (F1_GRID_ORDER fallback removed)
           };
           const allDists = allPredictions.map(getDist).filter(d => d !== Infinity);
           const minDist = allDists.length > 0 ? Math.min(...allDists) : Infinity;
@@ -2447,17 +2641,14 @@ function SeasonBoardView({ group, user }) {
 
     const loadNicknames = async () => {
       const nicknames = {};
-      if (group.members) {
-        for (const memberId of group.members) {
-          try {
-            const userRef = doc(db, "users", memberId);
-            const userDoc = await getDoc(userRef);
-            nicknames[memberId] = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.googleFirstName, userDoc.data()?.email);
-          } catch (e) {
-            nicknames[memberId] = "Unknown";
-          }
+      await Promise.all((group.members || []).map(async memberId => {
+        try {
+          const predDoc = await getDoc(doc(db, `groups/${group.id}/predictions`, memberId));
+          nicknames[memberId] = predDoc.data()?.nickname || "?";
+        } catch {
+          nicknames[memberId] = "?";
         }
-      }
+      }));
       setMemberNicknames(nicknames);
     };
 
@@ -2522,6 +2713,7 @@ function SeasonBoardView({ group, user }) {
         <h2 className="text-2xl font-bold mb-6" style={{ fontFamily: "'Orbitron'" }}>⭐ SEASON BOARD</h2>
 
         {/* Your Predictions Section */}
+        {message && <p className="text-center text-sm text-green-400 mb-4">{message}</p>}
         {!locked && (
           <div className="space-y-4 mb-8 bg-gray-800 p-4 rounded-lg border border-yellow-600/50">
             <h3 className="font-bold text-lg text-yellow-400">YOUR SEASON PREDICTIONS</h3>
@@ -2534,7 +2726,6 @@ function SeasonBoardView({ group, user }) {
               {F1_TEAMS.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
             <button onClick={saveSeasonPredictions} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded">Save Season Predictions</button>
-            {message && <p className="text-center text-sm text-green-400 mt-2">{message}</p>}
           </div>
         )}
         {locked && (
@@ -2657,8 +2848,12 @@ function HowToPlayView() {
                     <td className="p-3 text-center text-green-400 font-bold">+1</td>
                   </tr>
                   <tr className="bg-gray-700/30">
-                    <td className="p-3 text-gray-300">R# — DNS / DNF</td>
+                    <td className="p-3 text-gray-300">R# — DNS / NC <span className="text-gray-500 text-xs">(no official classified finish)</span></td>
                     <td className="p-3 text-center text-red-400 font-bold">0</td>
+                  </tr>
+                  <tr className="bg-gray-700/30">
+                    <td className="p-3 text-gray-300">R# — Retired but classified <span className="text-gray-500 text-xs">(scored normally at their official position)</span></td>
+                    <td className="p-3 text-center text-gray-400 font-bold">as P#</td>
                   </tr>
                 </tbody>
               </table>
@@ -2670,11 +2865,17 @@ function HowToPlayView() {
             <div className="bg-gray-800 rounded p-4 text-sm space-y-2 text-gray-300">
               <p>Before each race, the admin rolls a random number (e.g. P10). You predict which driver will finish at that position.</p>
               <p>After the race, the admin records where your predicted driver <span className="text-white font-semibold">actually finished</span>. The player whose driver finished <span className="text-white font-semibold">closest to the target position</span> wins the bonus.</p>
+              <p className="text-xs text-gray-400">
+                <span className="text-purple-300 font-semibold">Retirements still count:</span> if a driver retires but earns an official classified position
+                (F1 still classifies a car that completes ≥90% of the race distance — e.g. "Retired, Classified P14"), that position is used and scored
+                exactly like a normal finish. Only <span className="text-white font-semibold">DNS</span> (did not start) or <span className="text-white font-semibold">NC</span> (not
+                classified — completed &lt;90% of the race) score zero.
+              </p>
               <div className="bg-gray-900 rounded p-3 mt-2 text-xs space-y-1 text-gray-400">
                 <p className="text-white font-semibold mb-1">Example — Target: P10</p>
                 <p>Player 1 predicted Hadjar → finished P8 → distance 2</p>
-                <p>Player 2 predicted Bearman → finished P11 → distance 1 <span className="text-green-400 font-bold">← closest, +1 pt</span></p>
-                <p>Player 3 predicted Bortoleto → DNS → distance ∞ → 0 pts</p>
+                <p>Player 2 predicted Bearman → retired but classified P11 → distance 1 <span className="text-green-400 font-bold">← closest, +1 pt</span></p>
+                <p>Player 3 predicted Bortoleto → crashed lap 2, Not Classified (NC) → distance ∞ → 0 pts</p>
               </div>
             </div>
           </div>
@@ -2684,13 +2885,17 @@ function HowToPlayView() {
             <div className="bg-gray-800 rounded p-4 text-sm text-gray-300 space-y-2">
               <div className="flex gap-3">
                 <span className="text-yellow-400 font-bold w-28 shrink-0">Normal race:</span>
-                <span>Lock at <span className="text-white font-semibold">30 minutes before FP2</span> (Friday afternoon)</span>
+                <span>Lock at <span className="text-white font-semibold">1 hour before Qualifying</span> (Saturday)</span>
               </div>
               <div className="flex gap-3">
                 <span className="text-yellow-400 font-bold w-28 shrink-0">Sprint weekend:</span>
-                <span>Lock at <span className="text-white font-semibold">30 minutes before Sprint Qualifying</span> (Friday afternoon)</span>
+                <span>Lock at <span className="text-white font-semibold">1 hour before Sprint Qualifying</span> (Friday afternoon)</span>
               </div>
-              <p className="text-red-400 text-xs pt-1">Once locked, no changes can be made — plan ahead.</p>
+              <div className="flex gap-3">
+                <span className="text-yellow-400 font-bold w-28 shrink-0">Opens:</span>
+                <span>Monday of the race week — unlimited edits until lock</span>
+              </div>
+              <p className="text-red-400 text-xs pt-1">Once locked, no changes can be made without admin override.</p>
             </div>
           </div>
 
@@ -2811,16 +3016,29 @@ function SessionRow({ label, startIso, durationMs, nowTs }) {
 
 // RESULTS VIEW - ADMIN ENTRY
 function ResultsView({ group, user, currentRound }) {
-  const [selectedRound, setSelectedRound] = useState(currentRound);
+  // Default to the last completed race (currentRound - 1), not the upcoming race.
+  // currentRound points at the NEXT race to predict; results are for the one just finished.
+  const [selectedRound, setSelectedRound] = useState(() => Math.max(1, currentRound - 1));
   const race = F1_SCHEDULE_2026[selectedRound - 1];
   const { apiData, apiStatus } = useF1ApiSchedule(2026);
 
-  // Merge: API times win, hardcoded as fallback
+  // Merge: API times win, hardcoded as fallback.
+  // IMPORTANT: validate API date against hardcoded before trusting it.
+  // The Jolpica API uses the real-world 2026 calendar round numbers, which can
+  // diverge from our hardcoded numbers if races are cancelled or rescheduled
+  // mid-season. If the API's raceStart differs from hardcoded by more than 10
+  // days, the round numbers have shifted — discard the API data for this round
+  // and fall back to hardcoded so the 24-hour lock calculates correctly.
   const apiRound = apiData?.[selectedRound];
-  const raceStartStr = apiRound?.raceStart ?? race?.raceStart ?? null;
-  const sprintStartStr = apiRound?.sprintStart ?? null;
-  const sprintQualifyingStartStr = apiRound?.sprintQualifyingStart ?? null;
-  const usingApiData = apiStatus === 'ok' && apiRound?.raceStart != null;
+  const _hardcodedMs = race?.raceStart ? new Date(race.raceStart).getTime() : null;
+  const _apiMs = apiRound?.raceStart ? new Date(apiRound.raceStart).getTime() : null;
+  const apiRoundValid = _hardcodedMs && _apiMs
+    ? Math.abs(_apiMs - _hardcodedMs) < 10 * 24 * 60 * 60 * 1000
+    : false;
+  const raceStartStr = (apiRoundValid ? apiRound?.raceStart : null) ?? race?.raceStart ?? null;
+  const sprintStartStr = apiRoundValid ? (apiRound?.sprintStart ?? null) : null;
+  const sprintQualifyingStartStr = apiRoundValid ? (apiRound?.sprintQualifyingStart ?? null) : null;
+  const usingApiData = apiStatus === 'ok' && apiRoundValid && apiRound?.raceStart != null;
   const [results, setResults] = useState({
     pole: "",
     sprintQualPole: "",
@@ -2840,6 +3058,18 @@ function ResultsView({ group, user, currentRound }) {
   const [roundPredictions, setRoundPredictions] = useState([]); // [{uid, nickname, driver}]
   const [nowTs, setNowTs] = useState(() => Date.now());
   const [showEndConfirm, setShowEndConfirm] = useState(false);
+  const [raceStatus, setRaceStatus] = useState(null);
+
+  // Subscribe to raceStatus for selected round (drives the manual-open button)
+  useEffect(() => {
+    if (!group) return;
+    setRaceStatus(null);
+    const unsub = onSnapshot(
+      doc(db, `groups/${group.id}/raceStatus`, `round${selectedRound}`),
+      (snap) => setRaceStatus(snap.exists() ? snap.data() : {})
+    );
+    return () => unsub();
+  }, [group, selectedRound]);
 
   // Update timestamp every minute for countdown accuracy
   useEffect(() => {
@@ -2960,29 +3190,9 @@ function ResultsView({ group, user, currentRound }) {
 
   const calculateAndSaveScores = async () => {
     try {
-      // Get all predictions for this event
       const predictionsSnapshot = await getDocs(
         collection(db, `groups/${group.id}/predictions`)
       );
-
-      const exact = (pred, result) => pred && result && pred === result ? 1 : 0;
-
-      // Helper: get R# distance for a player using rPredFinishPositions (new method)
-      // Falls back to F1_GRID_ORDER distance if rPredFinishPositions not set (old races)
-      const getRfDistance = (userId, predicted) => {
-        const posStr = results.rPredFinishPositions?.[userId];
-        if (posStr) {
-          if (posStr === "DNS" || posStr === "DNF") return Infinity;
-          const pos = parseInt(posStr.replace("P", ""), 10);
-          return isNaN(pos) ? Infinity : Math.abs(pos - randomNumber);
-        }
-        // Fallback: F1_GRID_ORDER distance vs finisherAtPosition
-        const actualFinisher = results.finisherAtPosition;
-        const actualIdx = actualFinisher ? F1_GRID_ORDER.indexOf(actualFinisher) : -1;
-        const predIdx = predicted ? F1_GRID_ORDER.indexOf(predicted) : -1;
-        return (predicted && actualFinisher && predIdx !== -1 && actualIdx !== -1)
-          ? Math.abs(predIdx - actualIdx) : Infinity;
-      };
 
       // First pass: collect all player data and compute R# distances
       const playerData = [];
@@ -2990,8 +3200,7 @@ function ResultsView({ group, user, currentRound }) {
         const userId = predDoc.id;
         const roundData = predDoc.data()[`round${selectedRound}`];
         if (!roundData) continue;
-        const predicted = roundData.finisherPosition;
-        const distance = getRfDistance(userId, predicted);
+        const distance = rfDistance(userId, roundData.finisherPosition, results.rPredFinishPositions, randomNumber);
         playerData.push({ userId, roundData, distance });
       }
 
@@ -2999,67 +3208,54 @@ function ResultsView({ group, user, currentRound }) {
       const validDistances = playerData.filter(p => p.distance !== Infinity).map(p => p.distance);
       const minDistance = validDistances.length > 0 ? Math.min(...validDistances) : Infinity;
 
-      console.log(`Found ${playerData.length} players with predictions`);
-      console.log(`R# Finishing Positions: ${JSON.stringify(results.rPredFinishPositions)}`);
-      playerData.forEach(p => {
-        console.log(`  ${p.userId}: predicted "${p.roundData.finisherPosition}" → distance ${p.distance === Infinity ? 'N/A' : p.distance}`);
-      });
-      console.log(`Closest distance: ${minDistance === Infinity ? 'N/A' : minDistance} positions`);
-      const closestPlayers = playerData.filter(p => p.distance === minDistance).map(p => p.userId);
-      console.log(`Closest player(s): ${closestPlayers.join(', ')}`);
-      console.log(`SCORING EACH PLAYER:`);
-
       // Second pass: calculate and save scores
       for (const { userId, roundData, distance } of playerData) {
-        let totalPoints = 0;
-        const breakdown = {};
-
-        breakdown.pole = exact(roundData.pole, results.pole);
-        totalPoints += breakdown.pole;
-
-        if (race.isSprint) {
-          breakdown.sprintQualPole = exact(roundData.sprintQualPole, results.sprintQualPole);
-          totalPoints += breakdown.sprintQualPole;
-          breakdown.sprintP1 = exact(roundData.sprintP1, results.sprintP1);
-          totalPoints += breakdown.sprintP1;
-          breakdown.sprintP2 = exact(roundData.sprintP2, results.sprintP2);
-          totalPoints += breakdown.sprintP2;
-          breakdown.sprintP3 = exact(roundData.sprintP3, results.sprintP3);
-          totalPoints += breakdown.sprintP3;
-        }
-
-        breakdown.raceP1 = exact(roundData.raceP1, results.raceP1);
-        totalPoints += breakdown.raceP1;
-        breakdown.raceP2 = exact(roundData.raceP2, results.raceP2);
-        totalPoints += breakdown.raceP2;
-        breakdown.raceP3 = exact(roundData.raceP3, results.raceP3);
-        totalPoints += breakdown.raceP3;
-
-        // Competitive R# bonus: exact=+2, closest non-exact=+1, others=0
-        const isClosest = distance === minDistance && distance !== Infinity;
-        const rfPts = !isClosest ? 0 : (distance === 0 ? 2 : 1);
+        const { totalPoints, breakdown } = scoreRace(roundData, results, race.isSprint);
+        const rfPts = rfPoints(distance, minDistance);
         breakdown.randomFinisher = rfPts;
-        totalPoints += breakdown.randomFinisher;
-
-        if (rfPts === 2) {
-          console.log(`- ${userId}: R# EXACT MATCH ✓ +2 points`);
-        } else if (rfPts === 1) {
-          console.log(`- ${userId}: R# CLOSEST (distance: ${distance}) ✓ +1 point`);
-        } else {
-          console.log(`- ${userId}: R# Not closest (distance: ${distance === Infinity ? 'N/A' : distance}) ✗ 0 points`);
-        }
-
         const scoresRef = doc(db, `groups/${group.id}/scores`, userId);
         await setDoc(scoresRef, {
-          [`round${selectedRound}`]: {
-            totalPoints: totalPoints,
-            breakdown: breakdown
-          }
+          [`round${selectedRound}`]: { totalPoints: totalPoints + rfPts, breakdown }
         }, { merge: true });
       }
     } catch (error) {
       console.error("Error calculating scores:", error);
       throw error;
+    }
+  };
+
+  const handleResultsOverride = async (unlock) => {
+    try {
+      await setDoc(doc(db, `groups/${group.id}/raceStatus`, `round${selectedRound}`), {
+        resultsEditOverride: unlock,
+        resultsOverrideAt: new Date().toISOString(),
+        resultsOverrideBy: user.uid
+      }, { merge: true });
+      setMessage(unlock ? "🔓 Results unlocked — you can now edit and save." : "🔒 Results re-locked.");
+      setTimeout(() => setMessage(""), 4000);
+    } catch (err) {
+      console.error("Results override error:", err);
+      setMessage("❌ Error updating lock");
+    }
+  };
+
+  const handleManualOpenPredictions = async () => {
+    setLoading(true);
+    try {
+      await setDoc(doc(db, `groups/${group.id}/raceStatus`, `round${selectedRound}`), {
+        status: 'CURRENT',
+        isPredictionOpen: true,
+        openedAt: new Date().toISOString(),
+        openedManuallyBy: user.uid
+      }, { merge: true });
+      await updateDoc(doc(db, "groups", group.id), { currentOpenRound: `round${selectedRound}` });
+      setMessage(`✅ Predictions opened for Round ${selectedRound} — ${race?.name}`);
+      setTimeout(() => setMessage(""), 4000);
+    } catch (err) {
+      console.error("Error opening predictions:", err);
+      setMessage("❌ Error opening predictions");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -3073,6 +3269,7 @@ function ResultsView({ group, user, currentRound }) {
       await setDoc(statusRef(selectedRound), {
         status: 'PAST',
         isClosed: true,
+        isPredictionOpen: false,  // explicit — isRaceOpen() must return false for this round
         closedAt: new Date().toISOString(),
         closedBy: user.uid
       }, { merge: true });
@@ -3083,6 +3280,8 @@ function ResultsView({ group, user, currentRound }) {
           isPredictionOpen: true,
           openedAt: new Date().toISOString()
         }, { merge: true });
+        // Update group's currentOpenRound so isRaceOpen() points at the right document
+        await updateDoc(doc(db, "groups", group.id), { currentOpenRound: `round${nextRound}` });
       }
 
       // Log the event
@@ -3108,11 +3307,13 @@ function ResultsView({ group, user, currentRound }) {
   const isAdmin = group && group.admin === user.uid;
 
   // 24-hour edit lock — uses merged raceStartStr (API wins, hardcoded fallback)
+  // Admin can override via resultsEditOverride on raceStatus (persisted in Firestore).
   const lockTimeMs = raceStartStr
     ? new Date(raceStartStr).getTime() + 24 * 60 * 60 * 1000
     : null;
   const lockTime = lockTimeMs ? new Date(lockTimeMs) : null;
-  const isLocked = lockTimeMs !== null ? nowTs > lockTimeMs : false;
+  const adminResultsOverride = raceStatus?.resultsEditOverride === true;
+  const isLocked = (lockTimeMs !== null ? nowTs > lockTimeMs : false) && !adminResultsOverride;
   const msUntilLock = lockTimeMs !== null ? Math.max(0, lockTimeMs - nowTs) : 0;
   const hoursUntilLock = Math.floor(msUntilLock / (1000 * 60 * 60));
   const minutesUntilLock = Math.floor((msUntilLock % (1000 * 60 * 60)) / (1000 * 60));
@@ -3173,27 +3374,54 @@ function ResultsView({ group, user, currentRound }) {
           </div>
         )}
 
-        {/* Lock status banner */}
+        {/* ── Results lock/edit status banner (always shown to admin) ── */}
         {isAdmin && lockTime && (
           isLocked ? (
-            <div className="bg-red-900/40 border border-red-500 p-4 rounded mb-5">
-              <p className="text-red-400 font-bold text-base">⛔ RESULTS LOCKED</p>
-              <p className="text-red-300 text-sm mt-1">
-                The 24-hour editing window closed on {formatUTC(lockTime)}.
-              </p>
+            <div className="flex items-start gap-3 bg-red-950/60 border border-red-700/50 p-4 rounded mb-5">
+              <Lock size={16} className="text-red-400 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-red-400 font-bold text-sm">RESULTS LOCKED</p>
+                <p className="text-red-300/70 text-xs mt-0.5">
+                  {adminResultsOverride
+                    ? "Override active — editing is allowed despite the 24-hour window closing."
+                    : `24-hour edit window closed on ${formatUTC(lockTime)}.`}
+                </p>
+              </div>
+              <button
+                onClick={() => handleResultsOverride(true)}
+                disabled={loading}
+                className="shrink-0 px-3 py-1 bg-yellow-700 hover:bg-yellow-600 disabled:bg-gray-600 text-white text-xs font-bold rounded transition-colors"
+              >
+                🔓 Override
+              </button>
             </div>
           ) : (
-            <div className="bg-green-900/30 border border-green-600/50 p-4 rounded mb-5">
-              <p className="text-green-400 font-bold text-base">✅ RESULTS EDITABLE</p>
-              <p className="text-green-300 text-sm mt-1">
-                Edit window closes {formatUTC(lockTime)}{' '}
-                ({msUntilLock > 0 ? `${hoursUntilLock}h ${minutesUntilLock}m remaining` : 'closing soon'})
-              </p>
+            <div className="flex items-start gap-3 bg-green-950/50 border border-green-700/40 p-4 rounded mb-5">
+              <div className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse shrink-0 mt-1" />
+              <div className="flex-1">
+                <p className="text-green-400 font-bold text-sm">
+                  RESULTS EDITABLE{adminResultsOverride ? ' — OVERRIDE ACTIVE' : ''}
+                </p>
+                <p className="text-green-300/60 text-xs mt-0.5">
+                  {adminResultsOverride
+                    ? "Manually unlocked. Re-lock when done to prevent accidental edits."
+                    : `Edit window closes ${formatUTC(lockTime)} (${msUntilLock > 0 ? `${hoursUntilLock}h ${minutesUntilLock}m remaining` : 'closing soon'})`}
+                </p>
+              </div>
+              {adminResultsOverride && (
+                <button
+                  onClick={() => handleResultsOverride(false)}
+                  disabled={loading}
+                  className="shrink-0 px-3 py-1 bg-red-800 hover:bg-red-700 disabled:bg-gray-600 text-white text-xs font-bold rounded transition-colors"
+                >
+                  🔒 Re-lock
+                </button>
+              )}
             </div>
           )
         )}
 
-        {selectedRound < currentRound && !isLocked && isAdmin && (
+        {selectedRound < currentRound - 1 && !isLocked && isAdmin && (
           <div className="bg-yellow-900/30 border border-yellow-600/50 p-3 rounded mb-5">
             <p className="text-yellow-300 text-sm font-bold">⚠️ Editing past race results</p>
             <p className="text-yellow-200 text-xs mt-1">Saving will recalculate and overwrite points for this round for all players.</p>
@@ -3206,6 +3434,23 @@ function ResultsView({ group, user, currentRound }) {
           </div>
         ) : (
           <>
+            {/* Manual open predictions — shown when predictions are currently closed for this round */}
+            {raceStatus !== null && raceStatus.isPredictionOpen !== true && raceStatus.isClosed !== true && (
+              <div className="bg-green-950 border border-green-600/60 p-4 rounded mb-4 flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-green-400 font-bold text-sm mb-1">🟢 OPEN PREDICTIONS MANUALLY</p>
+                  <p className="text-green-200 text-xs">Predictions for Round {selectedRound} ({race?.name}) are currently closed. Use this to open them manually — useful when auto-open fires at odd hours.</p>
+                </div>
+                <button
+                  onClick={handleManualOpenPredictions}
+                  disabled={loading}
+                  className="shrink-0 bg-green-700 hover:bg-green-600 disabled:bg-gray-600 text-white text-sm font-bold px-4 py-2 rounded-lg transition-colors"
+                >
+                  Open Now
+                </button>
+              </div>
+            )}
+
             {!isLocked && (
               <div className="bg-blue-900/30 border border-blue-600/50 p-4 rounded mb-6">
                 <p className="text-blue-300 font-bold mb-2">🔐 ADMIN MODE</p>
@@ -3215,7 +3460,7 @@ function ResultsView({ group, user, currentRound }) {
             {isLocked && (
               <div className="bg-gray-800 border border-gray-700 p-4 rounded mb-6">
                 <p className="text-gray-400 font-bold mb-1">🔒 VIEW ONLY</p>
-                <p className="text-sm text-gray-500">Results can no longer be edited. The editing window has closed.</p>
+                <p className="text-sm text-gray-500">Results editing locked. Use the Override button above to make changes.</p>
               </div>
             )}
 
@@ -3363,6 +3608,9 @@ function ResultsView({ group, user, currentRound }) {
               {randomNumber && (
                 <div>
                   <label className="block text-sm font-bold mb-2">🎲 Driver at P{randomNumber}</label>
+                  <p className="text-xs text-gray-500 mb-2">
+                    If fewer than {randomNumber} cars were classified (e.g. a high-attrition race), there's no driver at this position — select <span className="text-white font-semibold">Not Classified</span> instead.
+                  </p>
                   <select
                     value={results.finisherAtPosition}
                     onChange={(e) => setResults({ ...results, finisherAtPosition: e.target.value })}
@@ -3371,6 +3619,7 @@ function ResultsView({ group, user, currentRound }) {
                   >
                     <option value="">Select Driver</option>
                     {F1_DRIVERS.map(d => <option key={d} value={d}>{d}</option>)}
+                    <option value="NC">Not Classified — fewer than {randomNumber} cars finished</option>
                   </select>
                 </div>
               )}
@@ -3378,7 +3627,9 @@ function ResultsView({ group, user, currentRound }) {
               {randomNumber && roundPredictions.length > 0 && (
                 <div className="border border-purple-600/50 rounded-lg p-4 bg-purple-900/10">
                   <p className="text-xs font-bold text-purple-400 mb-1 tracking-wide">🎲 R# PREDICTIONS — ACTUAL FINISHING POSITIONS</p>
-                  <p className="text-xs text-gray-400 mb-3">Where did each player's predicted driver actually finish? Select finishing position (or DNS/DNF). Scoring: exact P{randomNumber} = +2, closest = +1.</p>
+                  <p className="text-xs text-gray-400 mb-3">
+                    Where did each player's predicted driver actually finish? <span className="text-purple-300 font-semibold">If they retired but still earned an official classified position</span> (e.g. "Retired, Classified P14" — completed ≥90% of race distance), enter that position number — it scores normally against R#. Only use <span className="text-white font-semibold">DNS</span> (did not start) or <span className="text-white font-semibold">NC</span> (not classified — completed &lt;90% distance, no official position) when there's truly no finishing position. Scoring: exact P{randomNumber} = +2, closest = +1, DNS/NC = 0.
+                  </p>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {roundPredictions.map(({ uid, nickname, driver }) => (
                       <div key={uid}>
@@ -3398,8 +3649,8 @@ function ResultsView({ group, user, currentRound }) {
                           {Array.from({ length: 22 }, (_, i) => `P${i + 1}`).map(p => (
                             <option key={p} value={p}>{p}</option>
                           ))}
-                          <option value="DNS">DNS</option>
-                          <option value="DNF">DNF</option>
+                          <option value="DNS">DNS — Did Not Start</option>
+                          <option value="NC">NC — Not Classified</option>
                         </select>
                       </div>
                     ))}
@@ -3470,6 +3721,87 @@ function ResultsView({ group, user, currentRound }) {
   );
 }
 
+// LEAGUE SETTINGS CARD — admin only, rendered inside InvitesView
+const LOCK_OFFSET_OPTIONS = [
+  { value: 30,  label: '30 min before Qualifying' },
+  { value: 60,  label: '1 hour before Qualifying' },
+  { value: 120, label: '2 hours before Qualifying' },
+  { value: 180, label: '3 hours before Qualifying' },
+  { value: 360, label: '6 hours before Qualifying' },
+  { value: 720, label: '12 hours before Qualifying' },
+];
+
+function LeagueSettingsCard({ group }) {
+  const currentOffset = group?.predictionLockOffsetMins ?? 60;
+  const [saving, setSaving] = React.useState(false);
+  const [msg, setMsg] = React.useState('');
+  // pendingOffset holds the user's dropdown selection before they confirm.
+  // Keeps the dropdown from snapping back to the old value while Firestore propagates.
+  const [pendingOffset, setPendingOffset] = React.useState(null);
+
+  // When the group doc updates (Firestore propagated), clear the pending state.
+  React.useEffect(() => { setPendingOffset(null); }, [currentOffset]);
+
+  const displayOffset = pendingOffset ?? currentOffset;
+  const hasUnsavedChange = pendingOffset !== null && pendingOffset !== currentOffset;
+
+  const handleOffsetChange = (e) => {
+    setPendingOffset(parseInt(e.target.value));
+  };
+
+  const handleOffsetSave = async () => {
+    if (pendingOffset === null) return;
+    setSaving(true);
+    try {
+      await updateDoc(doc(db, "groups", group.id), { predictionLockOffsetMins: pendingOffset });
+      setMsg('✅ Lock time updated');
+      setTimeout(() => setMsg(''), 3000);
+      // pendingOffset cleared by the useEffect above once Firestore echoes back
+    } catch (err) {
+      console.error(err);
+      setMsg('❌ Error saving');
+      setPendingOffset(null);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-6 bg-gray-900 border border-gray-700 rounded-xl p-4">
+      <p className="text-xs font-black text-gray-500 tracking-widest mb-4">⚙️ LEAGUE SETTINGS</p>
+
+      {/* Prediction lock offset */}
+      <div className="mb-5">
+        <label className="block text-sm font-bold text-gray-300 mb-1">Prediction Cut-off</label>
+        <p className="text-xs text-gray-500 mb-2">
+          How early predictions close before Qualifying / Sprint Qualifying each race. Applies to every round this season.
+        </p>
+        <div className="flex gap-2">
+          <select
+            value={displayOffset}
+            onChange={handleOffsetChange}
+            disabled={saving}
+            className="flex-1 bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm disabled:opacity-50"
+          >
+            {LOCK_OFFSET_OPTIONS.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleOffsetSave}
+            disabled={!hasUnsavedChange || saving}
+            className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed rounded text-sm font-bold text-white transition-colors shrink-0"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+
+      {msg && <p className="text-xs text-center mt-2 text-green-400">{msg}</p>}
+    </div>
+  );
+}
+
 // INVITES VIEW
 function InvitesView({ group, user, generateInviteCode, inviteLink, inviteStats, onGroupUpdated }) {
   const [memberNicknames, setMemberNicknames] = useState({});
@@ -3480,17 +3812,16 @@ function InvitesView({ group, user, generateInviteCode, inviteLink, inviteStats,
   useEffect(() => {
     if (!group) return;
     const loadMemberNicknames = async () => {
-      try {
-        const nicknames = {};
-        for (const memberId of group.members) {
-          const userRef = doc(db, "users", memberId);
-          const userDoc = await getDoc(userRef);
-          nicknames[memberId] = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.googleFirstName, userDoc.data()?.email);
+      const nicknames = {};
+      await Promise.all((group.members || []).map(async memberId => {
+        try {
+          const predDoc = await getDoc(doc(db, `groups/${group.id}/predictions`, memberId));
+          nicknames[memberId] = predDoc.data()?.nickname || "?";
+        } catch {
+          nicknames[memberId] = "?";
         }
-        setMemberNicknames(nicknames);
-      } catch (error) {
-        console.error("Error:", error);
-      }
+      }));
+      setMemberNicknames(nicknames);
     };
     loadMemberNicknames();
   }, [group]);
@@ -3577,6 +3908,9 @@ function InvitesView({ group, user, generateInviteCode, inviteLink, inviteStats,
         ))}
       </div>
 
+      {/* ── League Settings (admin only) ── */}
+      {isAdmin && <LeagueSettingsCard group={group} />}
+
       {removeConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-gray-900 border-2 border-red-600 rounded-lg p-6 w-full max-w-sm">
@@ -3637,12 +3971,9 @@ function CalendarView({ group, user, currentRound }) {
         setResults(resultsMap);
 
         const nicknames = {};
-        await Promise.all((group.members || []).map(async memberId => {
-          try {
-            const ud = await getDoc(doc(db, "users", memberId));
-            nicknames[memberId] = getDisplayName(ud.data()?.nickname, ud.data()?.googleFirstName, ud.data()?.email);
-          } catch { nicknames[memberId] = '?'; }
-        }));
+        (group.members || []).forEach(memberId => {
+          nicknames[memberId] = predsMap[memberId]?.nickname || "?";
+        });
         setMemberNicknames(nicknames);
       } catch (e) {
         console.error("Calendar load error:", e);
@@ -3682,34 +4013,16 @@ function CalendarView({ group, user, currentRound }) {
       const raceResults = results[race.round];
       if (!raceResults) throw new Error("No results entered for this race yet");
       const randSnap = await getDoc(doc(db, `groups/${group.id}/randomNumbers`, `round${race.round}`));
-      const randomNumber = randSnap.exists() ? randSnap.data().number : null;
+      const raceRandomNumber = randSnap.exists() ? randSnap.data().number : null;
       const roundKey = `round${race.round}`;
       let saved = 0;
-      const ex = (p, r) => p && r && p === r ? 1 : 0;
-
-      // Helper: R# distance using rPredFinishPositions (new), fallback to F1_GRID_ORDER (old races)
-      const getRfDist = (uid, predicted) => {
-        const posStr = raceResults.rPredFinishPositions?.[uid];
-        if (posStr) {
-          if (posStr === "DNS" || posStr === "DNF") return Infinity;
-          const pos = parseInt(posStr.replace("P", ""), 10);
-          return isNaN(pos) ? Infinity : Math.abs(pos - randomNumber);
-        }
-        // Fallback: F1_GRID_ORDER distance vs finisherAtPosition
-        const actualFinisher = raceResults.finisherAtPosition;
-        const actualIdx = actualFinisher ? F1_GRID_ORDER.indexOf(actualFinisher) : -1;
-        const predIdx = predicted ? F1_GRID_ORDER.indexOf(predicted) : -1;
-        return (predicted && actualFinisher && predIdx !== -1 && actualIdx !== -1)
-          ? Math.abs(predIdx - actualIdx) : Infinity;
-      };
 
       // First pass: collect player data and compute R# distances
       const playerEntries = Object.entries(allPredictions)
         .map(([uid, predData]) => {
           const roundData = predData[roundKey];
           if (!roundData) return null;
-          const predicted = roundData.finisherPosition;
-          const distance = getRfDist(uid, predicted);
+          const distance = rfDistance(uid, roundData.finisherPosition, raceResults.rPredFinishPositions, raceRandomNumber);
           return { uid, roundData, distance };
         })
         .filter(Boolean);
@@ -3717,30 +4030,14 @@ function CalendarView({ group, user, currentRound }) {
       // Determine closest distance for competitive R# bonus
       const validDistances = playerEntries.filter(p => p.distance !== Infinity).map(p => p.distance);
       const minDistance = validDistances.length > 0 ? Math.min(...validDistances) : Infinity;
-      console.log(`[recalculate round${race.round}] Closest R# distance: ${minDistance === Infinity ? 'N/A' : minDistance}`);
 
       // Second pass: calculate and save scores
       for (const { uid, roundData, distance } of playerEntries) {
-        let totalPoints = 0;
-        const breakdown = {};
-        breakdown.pole = ex(roundData.pole, raceResults.pole); totalPoints += breakdown.pole;
-        breakdown.raceP1 = ex(roundData.raceP1, raceResults.raceP1); totalPoints += breakdown.raceP1;
-        breakdown.raceP2 = ex(roundData.raceP2, raceResults.raceP2); totalPoints += breakdown.raceP2;
-        breakdown.raceP3 = ex(roundData.raceP3, raceResults.raceP3); totalPoints += breakdown.raceP3;
-        if (race.isSprint) {
-          breakdown.sprintQualPole = ex(roundData.sprintQualPole, raceResults.sprintQualPole); totalPoints += breakdown.sprintQualPole;
-          breakdown.sprintP1 = ex(roundData.sprintP1, raceResults.sprintP1); totalPoints += breakdown.sprintP1;
-          breakdown.sprintP2 = ex(roundData.sprintP2, raceResults.sprintP2); totalPoints += breakdown.sprintP2;
-          breakdown.sprintP3 = ex(roundData.sprintP3, raceResults.sprintP3); totalPoints += breakdown.sprintP3;
-        }
-        // Competitive R# bonus: exact=+2, closest non-exact=+1, others=0
-        const isClosest = distance === minDistance && distance !== Infinity;
-        const rfPts = !isClosest ? 0 : (distance === 0 ? 2 : 1);
+        const { totalPoints, breakdown } = scoreRace(roundData, raceResults, race.isSprint);
+        const rfPts = rfPoints(distance, minDistance);
         breakdown.randomFinisher = rfPts;
-        totalPoints += breakdown.randomFinisher;
-        console.log(`[recalculate] ${uid}: R# distance=${distance === Infinity ? 'N/A' : distance} → ${rfPts > 0 ? `+${rfPts}` : '0'}`);
         const scoresRef = doc(db, `groups/${group.id}/scores`, uid);
-        await setDoc(scoresRef, { [roundKey]: { totalPoints, breakdown } }, { merge: true });
+        await setDoc(scoresRef, { [roundKey]: { totalPoints: totalPoints + rfPts, breakdown } }, { merge: true });
         saved++;
       }
       setCalcMsg(prev => ({ ...prev, [race.round]: `✅ Points saved for ${saved} players` }));
@@ -3792,7 +4089,9 @@ function CalendarView({ group, user, currentRound }) {
               {raceResults.randomNumber && (
                 <>
                   <span className="text-gray-400">P{raceResults.randomNumber}:</span>
-                  <span className="text-white font-semibold">{raceResults.finisherAtPosition || "—"}</span>
+                  <span className="text-white font-semibold">
+                    {raceResults.finisherAtPosition === 'NC' ? 'Not Classified' : (raceResults.finisherAtPosition || "—")}
+                  </span>
                 </>
               )}
             </div>
@@ -3876,7 +4175,9 @@ function CalendarView({ group, user, currentRound }) {
   };
 
   const renderCurrentDetails = (race) => {
-    const locked = isEditLocked(race);
+    const offsetMins = group?.predictionLockOffsetMins ?? 60;
+    const locked = isEditLocked(race, offsetMins);
+    const offsetLabel = offsetMins >= 60 ? `${offsetMins / 60}h` : `${offsetMins}min`;
     return (
       <div className="mt-3 pt-3 border-t border-gray-700">
         {locked ? (
@@ -3886,8 +4187,8 @@ function CalendarView({ group, user, currentRound }) {
         ) : (
           <div className="bg-green-900/30 border border-green-600/50 rounded p-3 space-y-1">
             <p className="text-green-400 font-bold text-sm">🟢 Open for Predictions</p>
-            <p className="text-xs text-gray-300">Locks in: <span className="text-red-400 font-bold">{currentCountdown}</span> (5 hrs before race start)</p>
-            <p className="text-xs text-gray-500">Go to Predictions tab to submit</p>
+            <p className="text-xs text-gray-300">Locks in: <span className="text-red-400 font-bold">{currentCountdown}</span></p>
+            <p className="text-xs text-gray-500">{offsetLabel} before {race.isSprint ? 'Sprint Qualifying' : 'Qualifying'} — go to Predictions tab to submit</p>
           </div>
         )}
       </div>
@@ -3895,9 +4196,11 @@ function CalendarView({ group, user, currentRound }) {
   };
 
   const renderUpcomingDetails = (race) => {
-    const lockTime = getPredictionLockTime(race);
+    const offsetMins = group?.predictionLockOffsetMins ?? 60;
+    const lockTime = getPredictionLockTime(race, offsetMins);
     const fmtOpts = { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' };
-    const lockLabel = race.isSprint ? '30 min before Sprint Qualifying' : '30 min before FP2';
+    const offsetLabel = offsetMins >= 60 ? `${offsetMins / 60}h` : `${offsetMins}min`;
+    const lockLabel = race.isSprint ? `${offsetLabel} before Sprint Qualifying` : `${offsetLabel} before Qualifying`;
     return (
       <div className="mt-3 pt-3 border-t border-gray-700">
         <div className="bg-gray-900 rounded p-3 text-xs text-gray-400 space-y-1">
@@ -4106,15 +4409,35 @@ function AuditView({ group }) {
                 >
                   <span className="text-red-500 font-black text-sm w-8 shrink-0">R{entry.round}</span>
                   <span className="font-bold text-white text-sm flex-1">{entry.nickname}</span>
+                  {/* Action badge */}
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded shrink-0 ${
+                    entry.action === 'prediction_submit' ? 'bg-green-900/60 text-green-400' :
+                    entry.action === 'prediction_edit'   ? 'bg-blue-900/60 text-blue-400' :
+                    entry.action === 'admin_unlock'      ? 'bg-yellow-900/60 text-yellow-400' :
+                    'bg-gray-700 text-gray-400'
+                  }`}>
+                    {entry.action === 'prediction_submit' ? '✅ Submit' :
+                     entry.action === 'prediction_edit'   ? '✏️ Edit' :
+                     entry.action === 'admin_unlock'      ? '🔓 Unlock' :
+                     entry.action || 'Save'}
+                  </span>
                   <span className="text-gray-400 text-xs shrink-0 hidden sm:block">{entry.raceName}</span>
                   <span className="text-yellow-300 text-xs shrink-0 ml-2">{fmt(entry.timestampIso)}</span>
                   <span className="text-gray-500 text-xs ml-2">{expanded === entry.id ? "▲" : "▼"}</span>
                 </button>
 
-                {/* Expanded prediction detail */}
+                {/* Expanded detail */}
                 {expanded === entry.id && (
                   <div className="px-4 pb-4 border-t border-gray-700 pt-3">
-                    <p className="text-xs text-gray-500 mb-2 font-semibold tracking-wide">PREDICTIONS SUBMITTED</p>
+                    {entry.action === 'admin_unlock' ? (
+                      <p className="text-xs text-yellow-400/80 py-1">
+                        Admin manually unlocked predictions for this round at {fmt(entry.timestampIso)}.
+                      </p>
+                    ) : (
+                    <>
+                    <p className="text-xs text-gray-500 mb-2 font-semibold tracking-wide">
+                      {entry.action === 'prediction_edit' ? 'PREDICTIONS EDITED' : 'PREDICTIONS SUBMITTED'}
+                    </p>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1 text-xs">
                       {predFields.map(([key, label]) =>
                         entry.predictions?.[key] ? (
@@ -4126,6 +4449,8 @@ function AuditView({ group }) {
                       )}
                     </div>
                     <p className="text-xs text-gray-600 mt-3">User ID: {entry.userId}</p>
+                    </>
+                    )}
                   </div>
                 )}
               </div>

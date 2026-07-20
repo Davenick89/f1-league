@@ -357,6 +357,89 @@ exports.sendPredictionReminders = onSchedule(
   }
 );
 
+// ─── Auto-lock round ──────────────────────────────────────────────────────────
+// Runs every 5 minutes. For each group, if the current open round's lock time
+// has passed and predictions are still open, closes them. Idempotent — skips
+// groups where isPredictionOpen is already false.
+
+exports.autoLockRound = onSchedule({ schedule: "every 5 minutes" }, async () => {
+  const db = getFirestore();
+  const now = Date.now();
+
+  const groupsSnap = await db.collection("groups").get();
+
+  for (const groupDoc of groupsSnap.docs) {
+    const currentOpenRound = groupDoc.data().currentOpenRound;
+    if (!currentOpenRound) continue;
+
+    const roundNum = parseInt(currentOpenRound.replace("round", ""), 10);
+    const race = F1_SCHEDULE_2026.find(r => r.round === roundNum);
+    if (!race) continue;
+
+    const lockTime = getPredictionLockTime(race);
+    if (!lockTime || lockTime.getTime() > now) continue; // Not yet time to lock
+
+    const statusRef = db.collection(`groups/${groupDoc.id}/raceStatus`).doc(currentOpenRound);
+    const statusSnap = await statusRef.get();
+
+    // Already locked — nothing to do
+    if (!statusSnap.exists || statusSnap.data().isPredictionOpen !== true) continue;
+
+    await statusRef.set({ isPredictionOpen: false, lockedAt: new Date().toISOString() }, { merge: true });
+    console.log(`[autoLockRound] Locked ${currentOpenRound} for group ${groupDoc.id}`);
+  }
+});
+
+// ─── Auto-open round ──────────────────────────────────────────────────────────
+// Runs every 10 minutes. For each group, determines which round should be open
+// for predictions right now (the earliest round whose lock time is still in the
+// future). If the group has no currentOpenRound, or the current round's lock
+// time has already passed, opens the next applicable round. Idempotent — skips
+// groups that are already pointing at the correct open round.
+
+exports.autoOpenRound = onSchedule({ schedule: "every 10 minutes" }, async () => {
+  const db = getFirestore();
+  const now = Date.now();
+
+  // Earliest race whose lock time is still in the future = round to open
+  const targetRace = F1_SCHEDULE_2026.find(race => {
+    const lockTime = getPredictionLockTime(race);
+    return lockTime && lockTime.getTime() > now;
+  });
+  if (!targetRace) return; // Season complete
+
+  const targetRoundKey = `round${targetRace.round}`;
+  const groupsSnap = await db.collection("groups").get();
+
+  for (const groupDoc of groupsSnap.docs) {
+    const currentOpenRound = groupDoc.data().currentOpenRound;
+
+    // Already pointing at the correct round — check status is open
+    if (currentOpenRound === targetRoundKey) {
+      const statusSnap = await db.collection(`groups/${groupDoc.id}/raceStatus`).doc(targetRoundKey).get();
+      if (statusSnap.exists && statusSnap.data().isPredictionOpen === true) continue;
+    }
+
+    // Don't override if the current round's lock time is still in the future
+    // (admin may have intentionally set a different round)
+    if (currentOpenRound) {
+      const currentRoundNum = parseInt(currentOpenRound.replace("round", ""), 10);
+      const currentRace = F1_SCHEDULE_2026.find(r => r.round === currentRoundNum);
+      const currentLockTime = currentRace ? getPredictionLockTime(currentRace) : null;
+      if (currentLockTime && currentLockTime.getTime() > now) continue;
+    }
+
+    // Open the target round for this group
+    await db.collection(`groups/${groupDoc.id}/raceStatus`).doc(targetRoundKey).set({
+      status: "CURRENT",
+      isPredictionOpen: true,
+      openedAt: new Date().toISOString(),
+    }, { merge: true });
+    await db.collection("groups").doc(groupDoc.id).update({ currentOpenRound: targetRoundKey });
+    console.log(`[autoOpenRound] Opened ${targetRoundKey} for group ${groupDoc.id}`);
+  }
+});
+
 // ─── Unsubscribe endpoint ─────────────────────────────────────────────────────
 // Linked from email footer — disables email notifications when clicked.
 exports.unsubscribeEmail = onRequest({ secrets: [] }, async (req, res) => {

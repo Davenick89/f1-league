@@ -27,3 +27,10 @@ Thumbs.db
 # Firebase
 .firebase/
 .firebaserc
+service-account.json
+
+# Claude Code (local settings only — launch.json is committed)
+.claude/settings.local.json
+
+# Logs
+functions/firebase-debug.log
