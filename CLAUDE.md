@@ -130,15 +130,51 @@ npm run preview   # Serve production build locally — http://localhost:4173
 ---
 
 ## Multi-agent setup (Claude + Codex)
-This project uses a two-agent workflow on the VPS:
-- **Claude Code** — plans, architects, validates, deploys
-- **Codex CLI** — executes bulk implementation when invoked by Claude Code via bash
 
-Claude Code runs Codex as a subprocess (non-interactive, full-auto mode):
+This project uses a two-agent workflow. Claude Code is always the primary agent.
+Codex is a worker — invoked by Claude Code via bash, never run manually.
+
+### Division of responsibility
+
+| Task | Who does it |
+|---|---|
+| Planning, architecture, decisions | Claude Code |
+| Security-sensitive code (rules, auth) | Claude Code only |
+| Bulk implementation, repetitive code | Codex |
+| Validation, review, fixing | Claude Code |
+| Deployment | Claude Code |
+
+### How to invoke Codex
+
+Always write a spec first, then pass it to Codex:
+
 ```bash
-codex --approval-policy=full-auto "implement: [spec]"
+# Step 1 — write a clear spec
+cat > /tmp/spec.md << 'EOF'
+[describe exactly what to implement — file paths, logic, acceptance criteria]
+EOF
+
+# Step 2 — run Codex in full-auto mode (non-interactive)
+codex --approval-policy=full-auto "$(cat /tmp/spec.md)"
+
+# Step 3 — review what changed
+git diff
 ```
-Claude Code then reads the diff and validates/fixes the result.
+
+### Validation after every Codex run
+
+After Codex finishes, always:
+1. Read every file it touched
+2. Check the diff against the spec
+3. Run `npm run build` — fix any build errors directly
+4. Fix anything wrong before moving on
+
+### When NOT to use Codex
+
+- Firestore security rules (syntax constraints — Claude Code knows them, Codex may not)
+- Auth flows
+- Anything touching the scoring engine (scoring.js) — correctness is critical
+- Deployment commands
 
 ---
 
