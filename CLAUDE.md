@@ -22,13 +22,34 @@ A React single-page app for running an F1 predictions league among friends. Play
 ## Key files
 | File | Purpose |
 |---|---|
-| `F1League.jsx` | Entire frontend — ~4400 lines, single-file SPA |
+| `F1League.jsx` | Entire frontend — ~4460 lines, single-file SPA (see structure below) |
 | `scoring.js` | Canonical scoring engine — `scoreRace()`, `rfDistance()`, `rfPoints()` |
 | `firestore.rules` | Security rules — all auth/lock logic lives here |
-| `functions/index.js` | Cloud Functions — `autoLockRound`, scoring triggers |
-| `validation.js` | Input validation helpers |
+| `functions/index.js` | Cloud Functions (v2, scheduled) — see below |
+| `validation.js` | Input validation helpers — `sanitizeInput`, `validateGroupName`, `validateNickname`, `validateDriverName`, `validateInviteCode`, `validatePredictions` |
 | `vite.config.js` | Vite config — dev server on port 5173 |
 | `.claude/launch.json` | Dev server configs for Claude Code browser preview |
+| `security/INCIDENT_RESPONSE.md` | Rollback procedures, deploy-phase checklists, backup/restore commands |
+| `security/backup.sh`, `security/integrity-check.cjs` | Firestore backup and document-count integrity check |
+
+There is no test suite (no test runner configured in `package.json` or `functions/package.json`).
+
+### F1League.jsx structure
+Single file, no router — view switching is done via local state. Top-level pieces, in file order:
+`LandingPage` → `SetNicknameModal` → `F1League` (root component, holds most state/handlers) → `AdminWizard` (league creation) → `LeaderboardView` / `UserStatsCard` / `PlayerSummaryModal` → `PredictionView` (the per-race prediction form) → `SeasonBoardView` → `HowToPlayView` → `useF1ApiSchedule` (fetches the season calendar) → `ResultsView` (admin result entry + scoring trigger) → `LeagueSettingsCard` → `InvitesView` → `CalendarView` → `AuditView`.
+
+Race schedule/session times come from the public **Jolpica Ergast API** (`https://api.jolpi.ca/ergast/f1/{season}.json`), fetched client-side — there is no local schedule data.
+
+Push notifications use Firebase Cloud Messaging (`getMessaging`, service worker at `public/firebase-messaging-sw.js`), separate from the scheduled email reminders sent by Cloud Functions.
+
+Scoring is computed **client-side**, not in a Cloud Function: when an admin enters/edits results in `ResultsView` (`handleSaveResults`), it calls `scoreRace()` / `rfDistance()` / `rfPoints()` from `scoring.js` directly and writes the result to `/groups/{groupId}/scores/{userId}`.
+
+### Cloud Functions (`functions/index.js`)
+All are scheduled (`onSchedule`) except the unsubscribe endpoint:
+- `sendPredictionReminders` — emails players before lock
+- `autoLockRound` — every 5 min, locks predictions once the lock time passes
+- `autoOpenRound` — every 10 min, opens the next round's predictions
+- `unsubscribeEmail` (`onRequest`) — one-click unsubscribe link handler
 
 ---
 
@@ -134,10 +155,24 @@ This project uses a two-agent workflow on the VPS:
 - **Claude Code** — plans, architects, validates, deploys
 - **Codex CLI** — executes bulk implementation when invoked by Claude Code via bash
 
-Claude Code runs Codex as a subprocess (non-interactive, full-auto mode):
+Codex auth for this project is the **ChatGPT Go login** (default `~/.codex`, no
+`CODEX_HOME` override needed here) — a small shared rate-limit pool, not
+pay-per-token. Only `free-bird` (a separate project on this VPS) uses the
+isolated API-key `CODEX_HOME`; that separation is handled automatically by a
+`cd`-based hook in `~/.bashrc`, nothing to do here.
+
+Claude Code runs Codex as a subprocess (non-interactive, full-auto mode).
+**Always pin the model explicitly** — see `~/CODEX_MODEL_SOP.md` for the full
+rationale — since this project is meant to stay on light tweaks/amendments,
+not rebuilds. **`gpt-5.6-sol` is not available on this project's ChatGPT Go
+login at all** (confirmed 400 error: "not supported when using Codex with a
+ChatGPT account") — only Terra and Luna are reachable here:
 ```bash
-codex --approval-policy=full-auto "implement: [spec]"
+codex exec -m gpt-5.6-terra --approval-policy=full-auto "implement: [spec]"   # default for real work
+codex exec -m gpt-5.6-luna  --approval-policy=full-auto "implement: [spec]"   # mechanical/repetitive edits
 ```
+If a task seems to need Sol-level reasoning, scope it down for Terra rather
+than reaching for a model this login can't use.
 Claude Code then reads the diff and validates/fixes the result.
 
 ---
