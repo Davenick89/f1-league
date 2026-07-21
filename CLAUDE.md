@@ -10,7 +10,7 @@ A React single-page app for running an F1 predictions league among friends. Play
 ---
 
 ## Tech stack
-- **Frontend:** React 18, Vite 5, Tailwind (via CDN in index.html)
+- **Frontend:** React 18, Vite 5, Tailwind v4 (via `@tailwindcss/vite`, built at compile time)
 - **Database:** Firestore (Firebase)
 - **Auth:** Firebase Auth (Google sign-in)
 - **Backend:** Firebase Cloud Functions (Node 22) — `functions/index.js`
@@ -151,29 +151,66 @@ npm run preview   # Serve production build locally — http://localhost:4173
 ---
 
 ## Multi-agent setup (Claude + Codex)
-This project uses a two-agent workflow on the VPS:
-- **Claude Code** — plans, architects, validates, deploys
-- **Codex CLI** — executes bulk implementation when invoked by Claude Code via bash
 
-Codex auth for this project is the **ChatGPT Go login** (default `~/.codex`, no
-`CODEX_HOME` override needed here) — a small shared rate-limit pool, not
-pay-per-token. Only `free-bird` (a separate project on this VPS) uses the
-isolated API-key `CODEX_HOME`; that separation is handled automatically by a
-`cd`-based hook in `~/.bashrc`, nothing to do here.
+This project uses a two-agent workflow. Claude Code is always the primary agent.
+Codex is a worker — invoked by Claude Code via bash, never run manually.
 
-Claude Code runs Codex as a subprocess (non-interactive, full-auto mode).
+### Division of responsibility
+
+| Task | Who does it |
+|---|---|
+| Planning, architecture, decisions | Claude Code |
+| Security-sensitive code (rules, auth) | Claude Code only |
+| Bulk implementation, repetitive code | Codex |
+| Validation, review, fixing | Claude Code |
+| Deployment | Claude Code |
+
+### Auth and model — this project
+
+Codex auth here is the **ChatGPT Go login** (default `~/.codex`, no `CODEX_HOME`
+override needed) — a small shared rate-limit pool, not pay-per-token. Only
+`free-bird` (a separate project on this VPS) uses the isolated API-key
+`CODEX_HOME`; that separation is automatic via a `cd`-based hook in `~/.bashrc`.
+
 **Always pin the model explicitly** — see `~/CODEX_MODEL_SOP.md` for the full
-rationale — since this project is meant to stay on light tweaks/amendments,
-not rebuilds. **`gpt-5.6-sol` is not available on this project's ChatGPT Go
-login at all** (confirmed 400 error: "not supported when using Codex with a
-ChatGPT account") — only Terra and Luna are reachable here:
+rationale. **`gpt-5.6-sol` is not available on this project's ChatGPT Go login
+at all** (confirmed 400 error: "not supported when using Codex with a ChatGPT
+account") — only Terra and Luna are reachable here. If a task seems to need
+Sol-level reasoning, scope it down for Terra rather than reaching for a model
+this login can't use.
+
+### How to invoke Codex
+
+Always write a spec first, then pass it to Codex:
+
 ```bash
-codex exec -m gpt-5.6-terra --approval-policy=full-auto "implement: [spec]"   # default for real work
-codex exec -m gpt-5.6-luna  --approval-policy=full-auto "implement: [spec]"   # mechanical/repetitive edits
+# Step 1 — write a clear spec
+cat > /tmp/spec.md << 'EOF'
+[describe exactly what to implement — file paths, logic, acceptance criteria]
+EOF
+
+# Step 2 — run Codex in full-auto mode (non-interactive), model pinned
+codex exec -m gpt-5.6-terra --approval-policy=full-auto "$(cat /tmp/spec.md)"   # default for real work
+codex exec -m gpt-5.6-luna  --approval-policy=full-auto "$(cat /tmp/spec.md)"   # mechanical/repetitive edits
+
+# Step 3 — review what changed
+git diff
 ```
-If a task seems to need Sol-level reasoning, scope it down for Terra rather
-than reaching for a model this login can't use.
-Claude Code then reads the diff and validates/fixes the result.
+
+### Validation after every Codex run
+
+After Codex finishes, always:
+1. Read every file it touched
+2. Check the diff against the spec
+3. Run `npm run build` — fix any build errors directly
+4. Fix anything wrong before moving on
+
+### When NOT to use Codex
+
+- Firestore security rules (syntax constraints — Claude Code knows them, Codex may not)
+- Auth flows
+- Anything touching the scoring engine (scoring.js) — correctness is critical
+- Deployment commands
 
 ---
 
