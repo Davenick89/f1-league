@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayRemove, arrayUnion, serverTimestamp, onSnapshot, Timestamp, runTransaction } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayRemove, arrayUnion, serverTimestamp, onSnapshot, Timestamp, runTransaction, writeBatch } from 'firebase/firestore';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { getAnalytics, logEvent, isSupported as analyticsIsSupported } from 'firebase/analytics';
 import { scoreRace, rfDistance, rfPoints } from './scoring.js';
@@ -527,19 +527,40 @@ export default function F1League() {
     try {
       const groupId = `group_${Date.now()}`;
       const groupRef = doc(db, "groups", groupId);
+      // FIX (Track B #7): was two independent writes, with currentOpenRound
+      // set on the FIRST one — if the second (raceStatus) failed, the group
+      // was left with currentOpenRound pointing at a raceStatus doc that
+      // didn't exist, and isRaceOpen() would permanently block predictions
+      // until manually repaired.
+      //
+      // Not a writeBatch here despite that being the fix everywhere else in
+      // this pass — verified empirically it can't work for this specific
+      // pair: the raceStatus write's rule requires isAdmin(groupId), which
+      // reads the group doc's state as it exists *before* the batch
+      // commits. Since the group is being created in the same batch, that
+      // read sees no group yet and the raceStatus write is rejected
+      // outright — a Firestore rules-evaluation constraint (writes within
+      // one batch can't see each other via get()), not a mistake in how
+      // the batch was called. Rollback via delete isn't an option either —
+      // this rules file has `allow delete: if false` on groups, always.
+      //
+      // Reordered instead: currentOpenRound is only set as the LAST step,
+      // once raceStatus/round1 is confirmed to exist. isRaceOpen() already
+      // treats a *missing* currentOpenRound as legacy-open (allowed) — so
+      // if anything fails partway, the group is left permissive rather
+      // than blocked, never in the broken state the audit flagged.
       await setDoc(groupRef, {
         name: groupName,
         admin: user.uid,
         members: [user.uid],
-        currentOpenRound: "round1",
         createdTimestamp: serverTimestamp()
       });
-      // Seed the first race status so isRaceOpen() works immediately
       await setDoc(doc(db, `groups/${groupId}/raceStatus`, "round1"), {
         status: 'CURRENT',
         isPredictionOpen: true,
         openedAt: new Date().toISOString()
       });
+      await updateDoc(groupRef, { currentOpenRound: "round1" });
       track('league_created', { league_name: groupName.trim() });
       setGroupName("");
       setShowCreateGroup(false);
@@ -1995,18 +2016,23 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
     try {
       const nowIso = new Date().toISOString();
       const expiresAt = Timestamp.fromDate(new Date(Date.now() + OVERRIDE_WINDOW_MINS * 60 * 1000));
-      await setDoc(doc(db, `groups/${group.id}/raceStatus`, `round${currentRound}`), {
+      // FIX (Track B #7): was three independent writes — a failure between
+      // the raceStatus write and the currentOpenRound write left the UI
+      // showing an open round while rules still enforced the old one.
+      // Batched so all three land together or none do.
+      const batch = writeBatch(db);
+      batch.set(doc(db, `groups/${group.id}/raceStatus`, `round${currentRound}`), {
         status: 'CURRENT',
         isPredictionOpen: true,
         openedAt: nowIso,
         openedManuallyBy: user.uid,
         overrideExpiresAt: expiresAt,   // enforced by Firestore rule + frontend countdown
       }, { merge: true });
-      await updateDoc(doc(db, "groups", group.id), {
+      batch.update(doc(db, "groups", group.id), {
         currentOpenRound: `round${currentRound}`,
       });
       // Audit: log admin unlock so there's a full record of when predictions were re-opened
-      await setDoc(doc(collection(db, `groups/${group.id}/auditLog`)), {
+      batch.set(doc(collection(db, `groups/${group.id}/auditLog`)), {
         userId: user.uid,
         nickname: user.displayName || user.email || user.uid,
         round: currentRound,
@@ -2015,6 +2041,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
         timestamp: serverTimestamp(),
         timestampIso: nowIso,
       });
+      await batch.commit();
       setMessage("✅ Predictions opened");
       setTimeout(() => setMessage(""), 4000);
     } catch (err) {
@@ -3261,16 +3288,24 @@ function ResultsView({ group, user, currentRound }) {
       const validDistances = playerData.filter(p => p.distance !== Infinity).map(p => p.distance);
       const minDistance = validDistances.length > 0 ? Math.min(...validDistances) : Infinity;
 
-      // Second pass: calculate and save scores
+      // Second pass: calculate and save scores.
+      // FIX (Track B #7): was one setDoc await per player in sequence — a
+      // failure partway through left results published with only some
+      // players rescored, with no way to tell from the data alone which
+      // ones. Batched: either every player's score updates together, or
+      // none do (up to Firestore's 500-write batch limit, far above this
+      // app's realistic league size).
+      const batch = writeBatch(db);
       for (const { userId, roundData, distance } of playerData) {
         const { totalPoints, breakdown } = scoreRace(roundData, results, race.isSprint);
         const rfPts = rfPoints(distance, minDistance);
         breakdown.randomFinisher = rfPts;
         const scoresRef = doc(db, `groups/${group.id}/scores`, userId);
-        await setDoc(scoresRef, {
+        batch.set(scoresRef, {
           [`round${selectedRound}`]: { totalPoints: totalPoints + rfPts, breakdown }
         }, { merge: true });
       }
+      await batch.commit();
     } catch (error) {
       console.error("Error calculating scores:", error);
       throw error;
@@ -3295,13 +3330,16 @@ function ResultsView({ group, user, currentRound }) {
   const handleManualOpenPredictions = async () => {
     setLoading(true);
     try {
-      await setDoc(doc(db, `groups/${group.id}/raceStatus`, `round${selectedRound}`), {
+      // FIX (Track B #7): batched — same reasoning as handleUnlockPredictions.
+      const batch = writeBatch(db);
+      batch.set(doc(db, `groups/${group.id}/raceStatus`, `round${selectedRound}`), {
         status: 'CURRENT',
         isPredictionOpen: true,
         openedAt: new Date().toISOString(),
         openedManuallyBy: user.uid
       }, { merge: true });
-      await updateDoc(doc(db, "groups", group.id), { currentOpenRound: `round${selectedRound}` });
+      batch.update(doc(db, "groups", group.id), { currentOpenRound: `round${selectedRound}` });
+      await batch.commit();
       setMessage(`✅ Predictions opened for Round ${selectedRound} — ${race?.name}`);
       setTimeout(() => setMessage(""), 4000);
     } catch (err) {
@@ -3319,7 +3357,12 @@ function ResultsView({ group, user, currentRound }) {
       const nextRound = selectedRound + 1;
       const statusRef = (round) => doc(db, `groups/${group.id}/raceStatus`, `round${round}`);
 
-      await setDoc(statusRef(selectedRound), {
+      // FIX (Track B #7): was up to four independent writes — a failure
+      // partway through (e.g. after closing the current round but before
+      // updating currentOpenRound) left the group pointing at a closed
+      // round, blocking every player. Batched: all writes land together.
+      const batch = writeBatch(db);
+      batch.set(statusRef(selectedRound), {
         status: 'PAST',
         isClosed: true,
         isPredictionOpen: false,  // explicit — isRaceOpen() must return false for this round
@@ -3328,23 +3371,25 @@ function ResultsView({ group, user, currentRound }) {
       }, { merge: true });
 
       if (nextRound <= 24) {
-        await setDoc(statusRef(nextRound), {
+        batch.set(statusRef(nextRound), {
           status: 'CURRENT',
           isPredictionOpen: true,
           openedAt: new Date().toISOString()
         }, { merge: true });
         // Update group's currentOpenRound so isRaceOpen() points at the right document
-        await updateDoc(doc(db, "groups", group.id), { currentOpenRound: `round${nextRound}` });
+        batch.update(doc(db, "groups", group.id), { currentOpenRound: `round${nextRound}` });
       }
 
       // Log the event
-      await setDoc(doc(db, `groups/${group.id}/systemLogs`, `endWeekend_${selectedRound}_${Date.now()}`), {
+      batch.set(doc(db, `groups/${group.id}/systemLogs`, `endWeekend_${selectedRound}_${Date.now()}`), {
         event: 'END_WEEKEND',
         closedRound: selectedRound,
         openedRound: nextRound <= 24 ? nextRound : null,
         triggeredBy: user.uid,
         timestamp: new Date().toISOString()
       });
+
+      await batch.commit();
 
       const nextRaceName = nextRound <= 24 ? F1_SCHEDULE_2026[nextRound - 1]?.name : null;
       const nextMsg = nextRaceName ? ` ${nextRaceName} (R${nextRound}) is now open!` : " Season complete!";
