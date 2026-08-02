@@ -12,38 +12,60 @@ initializeApp();
 const GMAIL_USER = defineSecret("GMAIL_USER");
 const GMAIL_APP_PASSWORD = defineSecret("GMAIL_APP_PASSWORD");
 
-// ─── Schedule (mirrors F1League.jsx F1_SCHEDULE_2026) ─────────────────────────
+// ─── Schedule (mirrors F1League.jsx F1_SCHEDULE_2026 — session fields must
+// stay byte-identical between the two copies; qualStart/sprintQualStart and
+// date are load-bearing for lock-time math below, not just display) ───────────
 const F1_SCHEDULE_2026 = [
-  { round: 1,  name: "Australia",           fp2: "2026-03-06T13:00:00Z",             raceStart: "2026-03-08T04:00:00Z", isSprint: false },
-  { round: 2,  name: "China",               sprintQualStart: "2026-03-13T13:30:00Z", raceStart: "2026-03-15T07:00:00Z", isSprint: true  },
-  { round: 3,  name: "Japan",               fp2: "2026-03-27T13:30:00Z",             raceStart: "2026-03-29T05:00:00Z", isSprint: false },
-  { round: 4,  name: "Bahrain",             fp2: "2026-04-10T17:30:00Z",             raceStart: "2026-04-12T15:00:00Z", isSprint: false },
-  { round: 5,  name: "Saudi Arabia",        fp2: "2026-04-17T20:30:00Z",             raceStart: "2026-04-19T17:00:00Z", isSprint: false },
-  { round: 6,  name: "Miami",               sprintQualStart: "2026-05-01T17:00:00Z", raceStart: "2026-05-03T19:30:00Z", isSprint: true  },
-  { round: 7,  name: "Canada",              sprintQualStart: "2026-05-22T18:00:00Z", raceStart: "2026-05-24T18:00:00Z", isSprint: true  },
-  { round: 8,  name: "Monaco",              fp2: "2026-06-05T17:30:00Z",             raceStart: "2026-06-07T13:00:00Z", isSprint: false },
-  { round: 9,  name: "Barcelona-Catalunya", fp2: "2026-06-12T16:30:00Z",             raceStart: "2026-06-14T13:00:00Z", isSprint: false },
-  { round: 10, name: "Austria",             fp2: "2026-06-26T17:30:00Z",             raceStart: "2026-06-28T13:00:00Z", isSprint: false },
-  { round: 11, name: "Great Britain",       sprintQualStart: "2026-07-03T17:00:00Z", raceStart: "2026-07-05T14:00:00Z", isSprint: true  },
-  { round: 12, name: "Belgium",             fp2: "2026-07-17T17:30:00Z",             raceStart: "2026-07-19T13:00:00Z", isSprint: false },
-  { round: 13, name: "Hungary",             fp2: "2026-07-24T17:30:00Z",             raceStart: "2026-07-26T13:00:00Z", isSprint: false },
-  { round: 14, name: "Netherlands",         sprintQualStart: "2026-08-21T18:00:00Z", raceStart: "2026-08-23T13:00:00Z", isSprint: true  },
-  { round: 15, name: "Italy",               fp2: "2026-09-04T16:30:00Z",             raceStart: "2026-09-06T13:00:00Z", isSprint: false },
-  { round: 16, name: "Spain",               fp2: "2026-09-11T17:30:00Z",             raceStart: "2026-09-13T13:00:00Z", isSprint: false },
-  { round: 17, name: "Azerbaijan",          fp2: "2026-09-25T15:30:00Z",             raceStart: "2026-09-27T11:00:00Z", isSprint: false },
-  { round: 18, name: "Singapore",           sprintQualStart: "2026-10-09T18:00:00Z", raceStart: "2026-10-11T12:00:00Z", isSprint: true  },
-  { round: 19, name: "United States",       fp2: "2026-10-23T15:30:00Z",             raceStart: "2026-10-25T19:00:00Z", isSprint: false },
-  { round: 20, name: "Mexico",              fp2: "2026-10-30T21:30:00Z",             raceStart: "2026-11-01T20:00:00Z", isSprint: false },
-  { round: 21, name: "Brazil",              fp2: "2026-11-06T14:30:00Z",             raceStart: "2026-11-08T17:00:00Z", isSprint: false },
-  { round: 22, name: "Las Vegas",           fp2: "2026-11-20T01:30:00Z",             raceStart: "2026-11-22T06:00:00Z", isSprint: false },
-  { round: 23, name: "Qatar",               fp2: "2026-11-27T18:30:00Z",             raceStart: "2026-11-29T16:00:00Z", isSprint: false },
-  { round: 24, name: "Abu Dhabi",           fp2: "2026-12-04T11:30:00Z",             raceStart: "2026-12-06T13:00:00Z", isSprint: false },
+  { round: 1,  name: "Australia",           date: "2026-03-08", fp1: "2026-03-06T09:30:00Z", fp2: "2026-03-06T13:00:00Z", qualStart: "2026-03-07T06:00:00Z", raceStart: "2026-03-08T04:00:00Z", isSprint: false },
+  { round: 2,  name: "China",               date: "2026-03-15", fp1: "2026-03-13T10:00:00Z", sprintQualStart: "2026-03-13T13:30:00Z",                        raceStart: "2026-03-15T07:00:00Z", isSprint: true  },
+  { round: 3,  name: "Japan",               date: "2026-03-29", fp1: "2026-03-27T10:00:00Z", fp2: "2026-03-27T13:30:00Z", qualStart: "2026-03-28T07:00:00Z", raceStart: "2026-03-29T05:00:00Z", isSprint: false },
+  { round: 4,  name: "Bahrain",             date: "2026-04-12", fp1: "2026-04-10T14:00:00Z", fp2: "2026-04-10T17:30:00Z", qualStart: "2026-04-11T15:00:00Z", raceStart: "2026-04-12T15:00:00Z", isSprint: false },
+  { round: 5,  name: "Saudi Arabia",        date: "2026-04-19", fp1: "2026-04-17T17:00:00Z", fp2: "2026-04-17T20:30:00Z", qualStart: "2026-04-18T17:00:00Z", raceStart: "2026-04-19T17:00:00Z", isSprint: false },
+  { round: 6,  name: "Miami",               date: "2026-05-03", fp1: "2026-05-01T13:00:00Z", sprintQualStart: "2026-05-01T17:00:00Z",                        raceStart: "2026-05-03T19:30:00Z", isSprint: true  },
+  { round: 7,  name: "Canada",              date: "2026-05-24", fp1: "2026-05-22T14:00:00Z", sprintQualStart: "2026-05-22T18:00:00Z",                        raceStart: "2026-05-24T18:00:00Z", isSprint: true  },
+  { round: 8,  name: "Monaco",              date: "2026-06-07", fp1: "2026-06-05T14:00:00Z", fp2: "2026-06-05T17:30:00Z", qualStart: "2026-06-06T13:00:00Z", raceStart: "2026-06-07T13:00:00Z", isSprint: false },
+  { round: 9,  name: "Barcelona-Catalunya", date: "2026-06-14", fp1: "2026-06-12T13:00:00Z", fp2: "2026-06-12T16:30:00Z", qualStart: "2026-06-13T13:00:00Z", raceStart: "2026-06-14T13:00:00Z", isSprint: false },
+  { round: 10, name: "Austria",             date: "2026-06-28", fp1: "2026-06-26T14:00:00Z", fp2: "2026-06-26T17:30:00Z", qualStart: "2026-06-27T13:00:00Z", raceStart: "2026-06-28T13:00:00Z", isSprint: false },
+  { round: 11, name: "Great Britain",       date: "2026-07-05", fp1: "2026-07-03T13:00:00Z", sprintQualStart: "2026-07-03T17:00:00Z",                        raceStart: "2026-07-05T14:00:00Z", isSprint: true  },
+  { round: 12, name: "Belgium",             date: "2026-07-19", fp1: "2026-07-17T14:00:00Z", fp2: "2026-07-17T17:30:00Z", qualStart: "2026-07-18T13:00:00Z", raceStart: "2026-07-19T13:00:00Z", isSprint: false },
+  { round: 13, name: "Hungary",             date: "2026-07-26", fp1: "2026-07-24T14:00:00Z", fp2: "2026-07-24T17:30:00Z", qualStart: "2026-07-25T13:00:00Z", raceStart: "2026-07-26T13:00:00Z", isSprint: false },
+  { round: 14, name: "Netherlands",         date: "2026-08-23", fp1: "2026-08-21T14:00:00Z", sprintQualStart: "2026-08-21T18:00:00Z",                        raceStart: "2026-08-23T13:00:00Z", isSprint: true  },
+  { round: 15, name: "Italy",               date: "2026-09-06", fp1: "2026-09-04T13:00:00Z", fp2: "2026-09-04T16:30:00Z", qualStart: "2026-09-05T13:00:00Z", raceStart: "2026-09-06T13:00:00Z", isSprint: false },
+  { round: 16, name: "Spain",               date: "2026-09-13", fp1: "2026-09-11T14:00:00Z", fp2: "2026-09-11T17:30:00Z", qualStart: "2026-09-12T13:00:00Z", raceStart: "2026-09-13T13:00:00Z", isSprint: false },
+  { round: 17, name: "Azerbaijan",          date: "2026-09-27", fp1: "2026-09-25T12:00:00Z", fp2: "2026-09-25T15:30:00Z", qualStart: "2026-09-26T11:00:00Z", raceStart: "2026-09-27T11:00:00Z", isSprint: false },
+  { round: 18, name: "Singapore",           date: "2026-10-11", fp1: "2026-10-09T14:00:00Z", sprintQualStart: "2026-10-09T18:00:00Z",                        raceStart: "2026-10-11T12:00:00Z", isSprint: true  },
+  { round: 19, name: "United States",       date: "2026-10-25", fp1: "2026-10-23T12:00:00Z", fp2: "2026-10-23T15:30:00Z", qualStart: "2026-10-24T19:00:00Z", raceStart: "2026-10-25T19:00:00Z", isSprint: false },
+  { round: 20, name: "Mexico",              date: "2026-11-01", fp1: "2026-10-30T18:00:00Z", fp2: "2026-10-30T21:30:00Z", qualStart: "2026-10-31T20:00:00Z", raceStart: "2026-11-01T20:00:00Z", isSprint: false },
+  { round: 21, name: "Brazil",              date: "2026-11-08", fp1: "2026-11-06T11:00:00Z", fp2: "2026-11-06T14:30:00Z", qualStart: "2026-11-07T17:00:00Z", raceStart: "2026-11-08T17:00:00Z", isSprint: false },
+  { round: 22, name: "Las Vegas",           date: "2026-11-21", fp1: "2026-11-19T22:00:00Z", fp2: "2026-11-20T01:30:00Z", qualStart: "2026-11-21T06:00:00Z", raceStart: "2026-11-22T06:00:00Z", isSprint: false },
+  { round: 23, name: "Qatar",               date: "2026-11-29", fp1: "2026-11-27T15:00:00Z", fp2: "2026-11-27T18:30:00Z", qualStart: "2026-11-28T14:00:00Z", raceStart: "2026-11-29T16:00:00Z", isSprint: false },
+  { round: 24, name: "Abu Dhabi",           date: "2026-12-06", fp1: "2026-12-04T08:00:00Z", fp2: "2026-12-04T11:30:00Z", qualStart: "2026-12-05T13:00:00Z", raceStart: "2026-12-06T13:00:00Z", isSprint: false },
 ];
 
-function getPredictionLockTime(race) {
-  const sessionStr = race.isSprint ? race.sprintQualStart : race.fp2;
-  if (sessionStr) return new Date(new Date(sessionStr).getTime() - 30 * 60 * 1000);
+// FIX (post-incident, 2026-07-24): was locking 30 min before FP2 (Friday),
+// hardcoded, ignoring each league's own offset setting — locking predictions
+// up to a day earlier than the frontend told players, and causing
+// autoOpenRound to skip straight to the next race once that early lock time
+// passed. Now mirrors F1League.jsx's getPredictionLockTime() exactly: locks
+// before Qualifying (or Sprint Qualifying), using the per-group
+// predictionLockOffsetMins setting instead of a hardcoded offset.
+function getPredictionLockTime(race, offsetMins = 60) {
+  const sessionStr = race.isSprint ? race.sprintQualStart : race.qualStart;
+  if (sessionStr) return new Date(new Date(sessionStr).getTime() - offsetMins * 60 * 1000);
   return race.raceStart ? new Date(new Date(race.raceStart).getTime() - 5 * 60 * 60 * 1000) : null;
+}
+
+// Mirrors F1League.jsx's getPredictionOpenTime(): Monday 00:00 UTC of race
+// week. Used as a floor so autoOpenRound can't open a round before its own
+// race week has started (same root cause as the lock-time mismatch above —
+// autoOpenRound previously had no such floor and would jump straight to the
+// next scheduled race the moment the current one's lock time passed).
+function getPredictionOpenTime(race) {
+  if (!race?.date) return null;
+  const raceDate = new Date(race.date + 'T00:00:00Z');
+  const dayOfWeek = raceDate.getUTCDay();
+  const daysSinceMonday = (dayOfWeek + 6) % 7;
+  return new Date(raceDate.getTime() - daysSinceMonday * 24 * 60 * 60 * 1000);
 }
 
 function fmtUTC(date) {
@@ -369,14 +391,17 @@ exports.autoLockRound = onSchedule({ schedule: "every 5 minutes" }, async () => 
   const groupsSnap = await db.collection("groups").get();
 
   for (const groupDoc of groupsSnap.docs) {
-    const currentOpenRound = groupDoc.data().currentOpenRound;
+    const groupData = groupDoc.data();
+    const currentOpenRound = groupData.currentOpenRound;
     if (!currentOpenRound) continue;
 
     const roundNum = parseInt(currentOpenRound.replace("round", ""), 10);
     const race = F1_SCHEDULE_2026.find(r => r.round === roundNum);
     if (!race) continue;
 
-    const lockTime = getPredictionLockTime(race);
+    // Per-group offset — defaults to 60 to match F1League.jsx's default.
+    const offsetMins = groupData.predictionLockOffsetMins ?? 60;
+    const lockTime = getPredictionLockTime(race, offsetMins);
     if (!lockTime || lockTime.getTime() > now) continue; // Not yet time to lock
 
     const statusRef = db.collection(`groups/${groupDoc.id}/raceStatus`).doc(currentOpenRound);
@@ -392,27 +417,41 @@ exports.autoLockRound = onSchedule({ schedule: "every 5 minutes" }, async () => 
 
 // ─── Auto-open round ──────────────────────────────────────────────────────────
 // Runs every 10 minutes. For each group, determines which round should be open
-// for predictions right now (the earliest round whose lock time is still in the
-// future). If the group has no currentOpenRound, or the current round's lock
-// time has already passed, opens the next applicable round. Idempotent — skips
-// groups that are already pointing at the correct open round.
+// for predictions right now — the earliest round whose lock time is still in
+// the future AND whose Monday-open floor has already passed. If no round
+// currently satisfies both (e.g. during a summer-break-style gap between one
+// round's lock and the next round's Monday), the group is skipped entirely —
+// nothing is opened. Idempotent — skips groups already pointing at the
+// correct open round.
+//
+// FIX (post-incident, 2026-07-24): target round is now computed per-group
+// (using that group's own predictionLockOffsetMins) instead of once
+// globally, and is gated by getPredictionOpenTime() — previously there was
+// no Monday floor at all, so the instant one round's (incorrectly early)
+// lock time passed, this function would immediately jump currentOpenRound
+// to the *next* scheduled race, even if that race was weeks away.
 
 exports.autoOpenRound = onSchedule({ schedule: "every 10 minutes" }, async () => {
   const db = getFirestore();
   const now = Date.now();
 
-  // Earliest race whose lock time is still in the future = round to open
-  const targetRace = F1_SCHEDULE_2026.find(race => {
-    const lockTime = getPredictionLockTime(race);
-    return lockTime && lockTime.getTime() > now;
-  });
-  if (!targetRace) return; // Season complete
-
-  const targetRoundKey = `round${targetRace.round}`;
   const groupsSnap = await db.collection("groups").get();
 
   for (const groupDoc of groupsSnap.docs) {
-    const currentOpenRound = groupDoc.data().currentOpenRound;
+    const groupData = groupDoc.data();
+    const offsetMins = groupData.predictionLockOffsetMins ?? 60;
+
+    // Earliest race whose lock time is still in the future AND whose
+    // race-week has actually started = round to open for this group.
+    const targetRace = F1_SCHEDULE_2026.find(race => {
+      const lockTime = getPredictionLockTime(race, offsetMins);
+      const openTime = getPredictionOpenTime(race);
+      return lockTime && lockTime.getTime() > now && (!openTime || openTime.getTime() <= now);
+    });
+    if (!targetRace) continue; // No round eligible to be open for this group right now (e.g. mid-break)
+
+    const targetRoundKey = `round${targetRace.round}`;
+    const currentOpenRound = groupData.currentOpenRound;
 
     // Already pointing at the correct round — check status is open
     if (currentOpenRound === targetRoundKey) {
@@ -425,7 +464,7 @@ exports.autoOpenRound = onSchedule({ schedule: "every 10 minutes" }, async () =>
     if (currentOpenRound) {
       const currentRoundNum = parseInt(currentOpenRound.replace("round", ""), 10);
       const currentRace = F1_SCHEDULE_2026.find(r => r.round === currentRoundNum);
-      const currentLockTime = currentRace ? getPredictionLockTime(currentRace) : null;
+      const currentLockTime = currentRace ? getPredictionLockTime(currentRace, offsetMins) : null;
       if (currentLockTime && currentLockTime.getTime() > now) continue;
     }
 
