@@ -5,7 +5,7 @@ import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, u
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { getAnalytics, logEvent, isSupported as analyticsIsSupported } from 'firebase/analytics';
 import { scoreRace, rfDistance, rfPoints } from './scoring.js';
-import { validatePredictions } from './validation.js';
+import { validatePredictions, validateNickname, validateGroupName, validateInviteCode } from './validation.js';
 import { Menu, X, LogOut, Plus, Users, Trophy, BarChart3, Settings, Copy, Check, Calendar, Lock, Edit, Info } from 'lucide-react';
 
 const firebaseConfig = {
@@ -252,7 +252,7 @@ function GroupStandingBadge({ groupId, userId }) {
   );
 }
 
-function SetNicknameModal({ googleFirstName, onSave, onSkip }) {
+function SetNicknameModal({ googleFirstName, onSave, onSkip, message }) {
   const [value, setValue] = React.useState(googleFirstName || '');
 
   return (
@@ -275,6 +275,7 @@ function SetNicknameModal({ googleFirstName, onSave, onSkip }) {
           maxLength={20}
           className="w-full bg-gray-900 border-2 border-gray-800 focus:border-red-600 rounded-xl p-3 text-white mb-4 outline-none transition"
         />
+        {message && <p className="mt-3 text-sm text-yellow-400">{message}</p>}
         <div className="flex gap-2">
           {googleFirstName && (
             <button
@@ -320,6 +321,7 @@ export default function F1League() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showNicknameSetup, setShowNicknameSetup] = useState(false);
   const [googleFirstName, setGoogleFirstName] = useState('');
+  const [message, setMessage] = useState("");
 
   // Run schedule sync once on mount — diagnostic only (console.error on drift,
   // doesn't feed any user-visible state), so it's deferred off the critical
@@ -369,14 +371,15 @@ export default function F1League() {
         // rules. The invite doc itself carries leagueName so the modal can
         // be shown without a second read.
         const inviteCodeParam = params.get('invite');
-        if (inviteCodeParam) {
-          const inviteRef = doc(db, "invites", inviteCodeParam);
+        const inviteValidation = validateInviteCode(inviteCodeParam);
+        if (inviteValidation.valid) {
+          const inviteRef = doc(db, "invites", inviteValidation.value);
           const inviteDoc = await getDoc(inviteRef);
           if (inviteDoc.exists()) {
             const inviteData = inviteDoc.data();
             const alreadyMember = loadedGroups.some(g => g.id === inviteData.leagueId);
             setPendingInvite({
-              code: inviteCodeParam,
+              code: inviteValidation.value,
               leagueId: inviteData.leagueId,
               leagueName: inviteData.leagueName || "F1 League",
               alreadyMember,
@@ -462,18 +465,30 @@ export default function F1League() {
   };
 
   const saveNicknameSetup = async (name) => {
-    if (user && name) {
-      await setDoc(doc(db, "users", user.uid), { nickname: name }, { merge: true });
-      setNickname(name);
+    if (!user) return;
+    const validation = validateNickname(name);
+    if (!validation.valid) {
+      setMessage(`⚠️ ${validation.error}`);
+      setTimeout(() => setMessage(""), 4000);
+      return;
     }
+    await setDoc(doc(db, "users", user.uid), { nickname: validation.value }, { merge: true });
+    setNickname(validation.value);
     setShowNicknameSetup(false);
   };
 
   const saveNickname = async () => {
-    if (!user || !nickname.trim()) return;
+    if (!user) return;
+    const validation = validateNickname(nickname);
+    if (!validation.valid) {
+      setMessage(`⚠️ ${validation.error}`);
+      setTimeout(() => setMessage(""), 4000);
+      return;
+    }
     try {
       const profileRef = doc(db, "users", user.uid);
-      await setDoc(profileRef, { nickname: nickname.trim() }, { merge: true });
+      await setDoc(profileRef, { nickname: validation.value }, { merge: true });
+      setNickname(validation.value);
       setShowSettings(false);
     } catch (error) {
       console.error("Error saving nickname:", error);
@@ -523,7 +538,13 @@ export default function F1League() {
   };
 
   const createNewGroup = async () => {
-    if (!groupName.trim() || !user) return;
+    if (!user) return;
+    const validation = validateGroupName(groupName);
+    if (!validation.valid) {
+      setMessage(`⚠️ ${validation.error}`);
+      setTimeout(() => setMessage(""), 4000);
+      return;
+    }
     try {
       const groupId = `group_${Date.now()}`;
       const groupRef = doc(db, "groups", groupId);
@@ -550,7 +571,7 @@ export default function F1League() {
       // if anything fails partway, the group is left permissive rather
       // than blocked, never in the broken state the audit flagged.
       await setDoc(groupRef, {
-        name: groupName,
+        name: validation.value,
         admin: user.uid,
         members: [user.uid],
         createdTimestamp: serverTimestamp()
@@ -694,7 +715,7 @@ export default function F1League() {
   }
 
   if (showNicknameSetup) {
-    return <SetNicknameModal googleFirstName={googleFirstName} onSave={saveNicknameSetup} onSkip={() => setShowNicknameSetup(false)} />;
+    return <SetNicknameModal googleFirstName={googleFirstName} onSave={saveNicknameSetup} onSkip={() => setShowNicknameSetup(false)} message={message} />;
   }
 
   if (!selectedGroup) {
@@ -752,6 +773,7 @@ export default function F1League() {
                 <h2 className="text-lg font-black text-white mb-5" style={{ fontFamily: 'Orbitron' }}>CREATE LEAGUE</h2>
                 <label className="block text-xs font-black text-gray-600 tracking-widest mb-2">LEAGUE NAME</label>
                 <input type="text" placeholder="e.g. Karvaan F1 2026" value={groupName} onChange={(e) => setGroupName(e.target.value)} onKeyDown={e => e.key === 'Enter' && createNewGroup()} autoFocus className="w-full bg-gray-900 border-2 border-gray-800 focus:border-red-600 rounded-xl p-3.5 text-white mb-5 outline-none transition" />
+                {message && <p className="-mt-3 mb-5 text-sm text-yellow-400">{message}</p>}
                 <div className="flex gap-2">
                   <button onClick={createNewGroup} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-black py-2.5 rounded-xl transition">Create</button>
                   <button onClick={() => setShowCreateGroup(false)} className="flex-1 bg-gray-900 hover:bg-gray-800 text-gray-400 font-bold py-2.5 rounded-xl transition">Cancel</button>
@@ -769,6 +791,7 @@ export default function F1League() {
                 <div>
                   <label className="block text-xs font-black text-gray-600 tracking-widest mb-2">NICKNAME</label>
                   <input type="text" placeholder="Enter your nickname" value={nickname} onChange={(e) => setNickname(e.target.value)} className="w-full bg-gray-900 border-2 border-gray-800 focus:border-red-600 rounded-xl p-3 text-white outline-none transition" />
+                  {message && <p className="mt-2 text-sm text-yellow-400">{message}</p>}
                   <button onClick={saveNickname} className="mt-2 w-full bg-red-600 hover:bg-red-700 text-white font-black py-2.5 rounded-xl transition">Save Nickname</button>
                 </div>
 
@@ -1023,6 +1046,7 @@ export default function F1League() {
             <h2 className="text-xl font-black text-white mb-5" style={{ fontFamily: 'Orbitron' }}>SETTINGS</h2>
             <label className="block text-xs font-black text-gray-600 tracking-widest mb-2">NICKNAME</label>
             <input type="text" placeholder="Enter your nickname" value={nickname} onChange={(e) => setNickname(e.target.value)} className="w-full bg-gray-900 border-2 border-gray-800 focus:border-red-600 rounded-xl p-3 text-white mb-4 outline-none transition" />
+            {message && <p className="-mt-2 mb-4 text-sm text-yellow-400">{message}</p>}
             <div className="flex gap-2">
               <button onClick={saveNickname} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-black py-2.5 rounded-xl transition">Save</button>
               <button onClick={() => setShowSettings(false)} className="flex-1 bg-gray-900 hover:bg-gray-800 text-gray-400 font-bold py-2.5 rounded-xl transition">Cancel</button>
