@@ -41,10 +41,20 @@ function track(eventName, params = {}) {
   try { logEvent(analytics, eventName, params); } catch (_) {}
 }
 
-// FCM — only initialised in browsers that support service workers + notifications
+// FCM — capability check is cheap and runs eagerly (drives Settings UI).
+// The actual messaging instance is only constructed lazily, the first time
+// enablePushNotifications() runs, since most visitors never open Settings.
+const fcmSupported = (() => {
+  try {
+    return 'serviceWorker' in navigator && 'Notification' in window;
+  } catch (e) {
+    return false;
+  }
+})();
 let messaging = null;
-try {
-  if ('serviceWorker' in navigator && 'Notification' in window) {
+function getMessagingInstance() {
+  if (messaging || !fcmSupported) return messaging;
+  try {
     messaging = getMessaging(app);
     // Show in-app notification toasts for foreground messages
     onMessage(messaging, (payload) => {
@@ -52,9 +62,10 @@ try {
       // Foreground FCM messages handled silently — no toast needed
       // Foreground toast is handled in the Settings UI via a state update
     });
+  } catch (e) {
+    // FCM not supported in this browser — silent fallback
   }
-} catch (e) {
-  // FCM not supported in this browser — silent fallback
+  return messaging;
 }
 
 const F1_SCHEDULE_2026 = [
@@ -310,8 +321,18 @@ export default function F1League() {
   const [showNicknameSetup, setShowNicknameSetup] = useState(false);
   const [googleFirstName, setGoogleFirstName] = useState('');
 
-  // Run schedule sync once on mount
-  useEffect(() => { syncScheduleWithAPI(); }, []);
+  // Run schedule sync once on mount — diagnostic only (console.error on drift,
+  // doesn't feed any user-visible state), so it's deferred off the critical
+  // startup path rather than competing with auth/profile/group fetches.
+  useEffect(() => {
+    const idle = window.requestIdleCallback
+      ? window.requestIdleCallback(() => syncScheduleWithAPI())
+      : setTimeout(() => syncScheduleWithAPI(), 2000);
+    return () => {
+      if (window.requestIdleCallback && window.cancelIdleCallback) window.cancelIdleCallback(idle);
+      else clearTimeout(idle);
+    };
+  }, []);
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (authUser) => {
@@ -460,7 +481,9 @@ export default function F1League() {
   };
 
   const enablePushNotifications = async () => {
-    if (!messaging || !user) return;
+    if (!fcmSupported || !user) return;
+    const messagingInstance = getMessagingInstance();
+    if (!messagingInstance) return;
     setNotifStatus('requesting');
     try {
       const permission = await Notification.requestPermission();
@@ -470,7 +493,7 @@ export default function F1League() {
       }
       // Register the service worker first so FCM can use it
       const swReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-      const token = await getToken(messaging, {
+      const token = await getToken(messagingInstance, {
         vapidKey: VAPID_KEY,
         serviceWorkerRegistration: swReg,
       });
@@ -701,7 +724,7 @@ export default function F1League() {
                 {/* Push Notifications */}
                 <div className="border-t border-gray-800 pt-5">
                   <p className="text-xs font-black text-gray-600 tracking-widest mb-3">PUSH NOTIFICATIONS</p>
-                  {!messaging ? (
+                  {!fcmSupported ? (
                     <p className="text-xs text-gray-500">Not supported in this browser.</p>
                   ) : (
                     <div className="space-y-3">
