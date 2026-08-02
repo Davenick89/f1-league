@@ -96,6 +96,17 @@ function fmtUTC(date) {
 }
 
 // ─── Email HTML Template ───────────────────────────────────────────────────────
+function escapeHtml(str) {
+  if (typeof str !== "string") return "";
+  return str.replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;",
+  })[char]);
+}
+
 function buildEmailHtml({ raceName, raceRound, minsUntilLock, lockTime, isSprint, predictions, leagueName, totalPoints, leagueRank, unsubscribeUrl }) {
   const fields = isSprint
     ? ["pole", "sprintQualPole", "sprintP1", "sprintP2", "sprintP3", "raceP1", "raceP2", "raceP3", "finisherPosition"]
@@ -120,14 +131,14 @@ function buildEmailHtml({ raceName, raceRound, minsUntilLock, lockTime, isSprint
       <tr>
         <td style="padding:6px 12px;color:#aaaaaa;font-size:13px;">${labels[f]}</td>
         <td style="padding:6px 12px;font-size:13px;font-weight:bold;color:${set ? "#4ade80" : "#ef4444"};">
-          ${set ? val : "Not set"}&nbsp;${set ? "✅" : "❌"}
+          ${set ? escapeHtml(val) : "Not set"}&nbsp;${set ? "✅" : "❌"}
         </td>
       </tr>`;
   }).join("");
 
   const rankLine = leagueRank
-    ? `<span style="color:#facc15;font-weight:bold;">P${leagueRank}</span> in ${leagueName} &nbsp;·&nbsp; <span style="color:#facc15;font-weight:bold;">${totalPoints ?? 0} pts</span>`
-    : `${leagueName} &nbsp;·&nbsp; <span style="color:#facc15;font-weight:bold;">${totalPoints ?? 0} pts</span>`;
+    ? `<span style="color:#facc15;font-weight:bold;">P${escapeHtml(String(leagueRank))}</span> in ${escapeHtml(leagueName)} &nbsp;·&nbsp; <span style="color:#facc15;font-weight:bold;">${escapeHtml(String(totalPoints ?? 0))} pts</span>`
+    : `${escapeHtml(leagueName)} &nbsp;·&nbsp; <span style="color:#facc15;font-weight:bold;">${escapeHtml(String(totalPoints ?? 0))} pts</span>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -153,7 +164,7 @@ function buildEmailHtml({ raceName, raceRound, minsUntilLock, lockTime, isSprint
         <tr>
           <td style="background:#1c0000;padding:18px 24px;text-align:center;border-left:1px solid #440000;border-right:1px solid #440000;">
             <div style="font-size:22px;font-weight:bold;color:#ffffff;">⏰ Predictions Closing Soon!</div>
-            <div style="font-size:14px;color:#ffaaaa;margin-top:6px;">${raceName} — Round ${raceRound}</div>
+            <div style="font-size:14px;color:#ffaaaa;margin-top:6px;">${escapeHtml(raceName)} — Round ${raceRound}</div>
           </td>
         </tr>
 
