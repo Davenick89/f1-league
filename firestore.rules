@@ -57,6 +57,66 @@ service cloud.firestore {
         );
     }
 
+    // ── FIX (Track B, security audit #1 — round-scoping gap): predictions
+    // writes previously only checked isRaceOpen(groupId) — whether *some*
+    // round was open — not which round-field within the (userId-keyed) doc
+    // was actually being modified. Any client could merge-write an
+    // already-locked historical round's data into the same request while
+    // any round was open, since the rule never inspected which keys changed.
+    //
+    // WHY NOT diff().affectedKeys(): the real write path
+    // (handleSavePredictions) nests serverTimestamp() inside the round
+    // being written. Per this file's existing FIX-2/invites precedent,
+    // diff() on a write containing a pending FieldValue transform doesn't
+    // evaluate reliably (silent permission-denied even on legitimate
+    // writes) — so, same as those rules, we explicitly compare every OTHER
+    // round key for equality instead of diffing the whole document.
+    //
+    // Season has a fixed 24-round calendar (see F1_SCHEDULE_2026 in both
+    // F1League.jsx and functions/index.js) — the bound is a real constant,
+    // not an approximation, so an explicit per-round check is exhaustive.
+
+    function roundUnchanged(before, after, roundKey) {
+      return (!(roundKey in after) && !(roundKey in before))
+        || (roundKey in after && roundKey in before && after[roundKey] == before[roundKey]);
+    }
+
+    // Bounds the entire key-set first (catches fabricated keys like a fake
+    // "round25" or arbitrary extra fields the per-round loop below would
+    // never inspect, since it only enumerates the 24 real round keys),
+    // then verifies every round key other than the current one is
+    // byte-identical to its prior value.
+    function onlyCurrentRoundChanged(before, after, currentRoundKey) {
+      return after.keys().hasOnly(['nickname',
+        'round1','round2','round3','round4','round5','round6','round7','round8',
+        'round9','round10','round11','round12','round13','round14','round15','round16',
+        'round17','round18','round19','round20','round21','round22','round23','round24'])
+        && roundUnchanged(before, after, 'round1'  == currentRoundKey ? '__skip__' : 'round1')
+        && roundUnchanged(before, after, 'round2'  == currentRoundKey ? '__skip__' : 'round2')
+        && roundUnchanged(before, after, 'round3'  == currentRoundKey ? '__skip__' : 'round3')
+        && roundUnchanged(before, after, 'round4'  == currentRoundKey ? '__skip__' : 'round4')
+        && roundUnchanged(before, after, 'round5'  == currentRoundKey ? '__skip__' : 'round5')
+        && roundUnchanged(before, after, 'round6'  == currentRoundKey ? '__skip__' : 'round6')
+        && roundUnchanged(before, after, 'round7'  == currentRoundKey ? '__skip__' : 'round7')
+        && roundUnchanged(before, after, 'round8'  == currentRoundKey ? '__skip__' : 'round8')
+        && roundUnchanged(before, after, 'round9'  == currentRoundKey ? '__skip__' : 'round9')
+        && roundUnchanged(before, after, 'round10' == currentRoundKey ? '__skip__' : 'round10')
+        && roundUnchanged(before, after, 'round11' == currentRoundKey ? '__skip__' : 'round11')
+        && roundUnchanged(before, after, 'round12' == currentRoundKey ? '__skip__' : 'round12')
+        && roundUnchanged(before, after, 'round13' == currentRoundKey ? '__skip__' : 'round13')
+        && roundUnchanged(before, after, 'round14' == currentRoundKey ? '__skip__' : 'round14')
+        && roundUnchanged(before, after, 'round15' == currentRoundKey ? '__skip__' : 'round15')
+        && roundUnchanged(before, after, 'round16' == currentRoundKey ? '__skip__' : 'round16')
+        && roundUnchanged(before, after, 'round17' == currentRoundKey ? '__skip__' : 'round17')
+        && roundUnchanged(before, after, 'round18' == currentRoundKey ? '__skip__' : 'round18')
+        && roundUnchanged(before, after, 'round19' == currentRoundKey ? '__skip__' : 'round19')
+        && roundUnchanged(before, after, 'round20' == currentRoundKey ? '__skip__' : 'round20')
+        && roundUnchanged(before, after, 'round21' == currentRoundKey ? '__skip__' : 'round21')
+        && roundUnchanged(before, after, 'round22' == currentRoundKey ? '__skip__' : 'round22')
+        && roundUnchanged(before, after, 'round23' == currentRoundKey ? '__skip__' : 'round23')
+        && roundUnchanged(before, after, 'round24' == currentRoundKey ? '__skip__' : 'round24');
+    }
+
     // ─── Users ───────────────────────────────────────────────────────────────
     // FIX 2: Users can only read their own profile document.
     //
@@ -127,17 +187,34 @@ service cloud.firestore {
 
       match /predictions/{userId} {
         allow read: if isMember(groupId);
-        allow create, update: if isAuth() && uid() == userId && isMember(groupId) && isRaceOpen(groupId);
+        // FIX (Track B #4): also require that no round other than the
+        // group's currentOpenRound changed — closes the gap where any round
+        // being open let a client rewrite any *other* (including locked
+        // historical) round's data in the same merge write. New-document
+        // creates have no prior state to protect, so they skip the check.
+        allow create, update: if isAuth() && uid() == userId && isMember(groupId) && isRaceOpen(groupId)
+          && (
+            !exists(/databases/$(database)/documents/groups/$(groupId)/predictions/$(userId))
+            || onlyCurrentRoundChanged(resource.data, request.resource.data, groupData(groupId).currentOpenRound)
+          );
         allow delete: if false;
       }
 
       // ── Season Predictions ────────────────────────────────────────────────
       // Members can read all season predictions (shown in the season board).
-      // Only the owner can write their own prediction, and must be a member.
+      // FIX (Track B #9): the frontend already treats a season prediction as
+      // locked forever once submitted (saveSeasonPredictions() sets
+      // locked=true and never offers an edit path back) — but nothing
+      // previously enforced that server-side, so a direct client could
+      // overwrite a "locked" pick at any time. Now create-once: allowed
+      // only when no prediction exists yet for this user; any write once
+      // one exists is denied, matching the app's own stated behavior.
 
       match /seasonPredictions/{userId} {
         allow read: if isMember(groupId);
-        allow write: if isAuth() && uid() == userId && isMember(groupId);
+        allow create: if isAuth() && uid() == userId && isMember(groupId)
+          && !exists(/databases/$(database)/documents/groups/$(groupId)/seasonPredictions/$(userId));
+        allow update, delete: if false;
       }
 
       // ── Scores ───────────────────────────────────────────────────────────
@@ -186,9 +263,19 @@ service cloud.firestore {
       // Any member can append their own prediction-save records.
       // Updates and deletes are never allowed (immutable log).
 
+      // FIX (Track B #8): create had no field checks at all — any member
+      // could write an entry with an arbitrary userId (impersonating
+      // another player or the admin) or an arbitrary action string
+      // (e.g. fabricating "admin_unlock" entries). Every write site in
+      // F1League.jsx already sets userId to the acting user's own uid, so
+      // requiring that server-side changes nothing for legitimate writes.
+
       match /auditLog/{logId} {
         allow read: if isAdmin(groupId);
-        allow create: if isMember(groupId);
+        allow create: if isMember(groupId)
+          && request.resource.data.userId == uid()
+          && request.resource.data.action in ['prediction_submit', 'prediction_edit', 'admin_unlock']
+          && (request.resource.data.action != 'admin_unlock' || isAdmin(groupId));
         allow update, delete: if false;
       }
 
