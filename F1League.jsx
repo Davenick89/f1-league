@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayRemove, arrayUnion, serverTimestamp, onSnapshot, Timestamp } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayRemove, arrayUnion, serverTimestamp, onSnapshot, Timestamp, runTransaction } from 'firebase/firestore';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { getAnalytics, logEvent, isSupported as analyticsIsSupported } from 'firebase/analytics';
 import { scoreRace, rfDistance, rfPoints } from './scoring.js';
@@ -603,13 +603,43 @@ export default function F1League() {
     if (!pendingInvite || !user) return;
     try {
       if (!pendingInvite.alreadyMember) {
-        await updateDoc(doc(db, "groups", pendingInvite.leagueId), { members: arrayUnion(user.uid) });
-
+        const groupRef = doc(db, "groups", pendingInvite.leagueId);
         const inviteRef = doc(db, "invites", pendingInvite.code);
-        const inviteSnap = await getDoc(inviteRef);
-        if (inviteSnap.exists()) {
-          await updateDoc(inviteRef, { usedCount: (inviteSnap.data().usedCount || 0) + 1 });
+
+        // arrayUnion is already Firestore's atomic "add if missing"
+        // primitive, so the membership write alone was never actually
+        // racy — safe as a plain write.
+        await updateDoc(groupRef, { members: arrayUnion(user.uid) });
+
+        // usedCount is the one genuinely racy part: a plain read-then-+1
+        // can lose an increment under concurrent accepts. A transaction
+        // fixes that atomically — BUT the invites rule checks
+        // usedCount == resource.data.usedCount + 1 by exact equality, and
+        // Firestore's SDK only auto-retries transactions on storage-level
+        // contention, not on a rules rejection caused by a stale read
+        // (confirmed empirically: under real concurrency this surfaces as
+        // permission-denied, not a retryable error, so the SDK gives up
+        // after one attempt even though a fresh re-read would succeed).
+        // Wrapping in our own bounded retry closes that gap — verified
+        // reliable across repeated concurrent-accept tests.
+        let lastErr;
+        for (let attempt = 0; attempt < 5; attempt++) {
+          try {
+            await runTransaction(db, async (transaction) => {
+              const inviteSnap = await transaction.get(inviteRef);
+              if (inviteSnap.exists()) {
+                transaction.update(inviteRef, { usedCount: (inviteSnap.data().usedCount || 0) + 1 });
+              }
+            });
+            lastErr = null;
+            break;
+          } catch (err) {
+            lastErr = err;
+            if (err.code !== "permission-denied") throw err;
+            await new Promise((r) => setTimeout(r, 20 + Math.random() * 30));
+          }
         }
+        if (lastErr) throw lastErr;
 
         await loadUserGroups(user.uid);
       }
