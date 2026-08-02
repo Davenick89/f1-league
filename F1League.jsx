@@ -2585,34 +2585,24 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
         ) : (() => {
           const hasResults = !!(allResults && allResults.pole && allResults.raceP1);
 
-          // Compute competitive R# distance for each prediction
-          const getDist = (p) => {
-            const posStr = allResults?.rPredFinishPositions?.[p.userId];
-            if (posStr) {
-              if (posStr === "DNS" || posStr === "NC") return Infinity;
-              const pos = parseInt(posStr.replace("P", ""), 10);
-              return isNaN(pos) || !randomNumber ? Infinity : Math.abs(pos - randomNumber);
-            }
-            return Infinity; // no finish position data — 0 pts (F1_GRID_ORDER fallback removed)
-          };
+          // FIX (Track B #12): this table used to reimplement scoreRace()'s
+          // exact-match logic and rfPoints()'s R# bonus logic inline,
+          // separately from the canonical versions in scoring.js that
+          // calculateAndSaveScores() actually uses to save leaderboard
+          // points. The two could silently drift — e.g. this duplicate
+          // never checked p.finisherPosition (whether the player predicted
+          // anything at all) before computing a distance, unlike the real
+          // rfDistance(). Now calls the same functions the save path uses,
+          // so what's displayed here is guaranteed to match saved scores.
+          const getDist = (p) => rfDistance(p.userId, p.finisherPosition, allResults?.rPredFinishPositions, randomNumber);
           const allDists = allPredictions.map(getDist).filter(d => d !== Infinity);
           const minDist = allDists.length > 0 ? Math.min(...allDists) : Infinity;
 
           const getBreakdown = (p) => {
             if (!allResults) return {};
-            const ex = (a, b) => (a && b && a === b) ? 1 : 0;
-            const d = getDist(p);
-            return {
-              pole: ex(p.pole, allResults.pole),
-              sprintQualPole: ex(p.sprintQualPole, allResults.sprintQualPole),
-              sprintP1: ex(p.sprintP1, allResults.sprintP1),
-              sprintP2: ex(p.sprintP2, allResults.sprintP2),
-              sprintP3: ex(p.sprintP3, allResults.sprintP3),
-              raceP1: ex(p.raceP1, allResults.raceP1),
-              raceP2: ex(p.raceP2, allResults.raceP2),
-              raceP3: ex(p.raceP3, allResults.raceP3),
-              randomFinisher: (d === minDist && d !== Infinity) ? (d === 0 ? 2 : 1) : 0,
-            };
+            const { breakdown } = scoreRace(p, allResults, race.isSprint);
+            breakdown.randomFinisher = rfPoints(getDist(p), minDist);
+            return breakdown;
           };
 
           const fn = (name) => name ? name.split(' ')[0] : '-';
