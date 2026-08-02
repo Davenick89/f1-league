@@ -6,11 +6,31 @@ const { getFirestore } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { getAuth } = require("firebase-admin/auth");
 const nodemailer = require("nodemailer");
+const crypto = require("crypto");
 
 initializeApp();
 
 const GMAIL_USER = defineSecret("GMAIL_USER");
 const GMAIL_APP_PASSWORD = defineSecret("GMAIL_APP_PASSWORD");
+const UNSUBSCRIBE_SIGNING_KEY = defineSecret("UNSUBSCRIBE_SIGNING_KEY");
+
+// FIX (Track B #5): the unsubscribe link previously carried a raw ?uid=,
+// unauthenticated — anyone who knew or guessed another player's Firebase
+// UID could hit it and silently disable that person's email reminders.
+// Now the link carries an HMAC signature (and issue timestamp) over the
+// uid, verified server-side before acting; a tampered or unrelated uid
+// fails signature verification, and links older than 90 days expire.
+const UNSUBSCRIBE_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
+
+function signUnsubscribe(uid, ts, key) {
+  return crypto.createHmac("sha256", key).update(`${uid}:${ts}`).digest("hex");
+}
+
+function buildUnsubscribeUrl(uid, key) {
+  const ts = Date.now();
+  const sig = signUnsubscribe(uid, ts, key);
+  return `https://us-central1-f1-predictions-league.cloudfunctions.net/unsubscribeEmail?uid=${uid}&ts=${ts}&sig=${sig}`;
+}
 
 // ─── Schedule (mirrors F1League.jsx F1_SCHEDULE_2026 — session fields must
 // stay byte-identical between the two copies; qualStart/sprintQualStart and
@@ -232,7 +252,7 @@ async function sendReminderEmail({ transporter, to, race, minsUntilLock, lockTim
 
 // ─── Main scheduled function ───────────────────────────────────────────────────
 exports.sendPredictionReminders = onSchedule(
-  { schedule: "every 5 minutes", secrets: [GMAIL_USER, GMAIL_APP_PASSWORD] },
+  { schedule: "every 5 minutes", secrets: [GMAIL_USER, GMAIL_APP_PASSWORD, UNSUBSCRIBE_SIGNING_KEY] },
   async () => {
     const db = getFirestore();
     const messaging = getMessaging();
@@ -360,7 +380,7 @@ exports.sendPredictionReminders = onSchedule(
             }
 
             if (userEmail) {
-              const unsubscribeUrl = `https://us-central1-f1-predictions-league.cloudfunctions.net/unsubscribeEmail?uid=${uid}`;
+              const unsubscribeUrl = buildUnsubscribeUrl(uid, UNSUBSCRIBE_SIGNING_KEY.value());
               const sent = await sendReminderEmail({
                 transporter, to: userEmail, race, minsUntilLock, lockTime,
                 predictions, leagueName, totalPoints, leagueRank, unsubscribeUrl,
@@ -481,10 +501,22 @@ exports.autoOpenRound = onSchedule({ schedule: "every 10 minutes" }, async () =>
 
 // ─── Unsubscribe endpoint ─────────────────────────────────────────────────────
 // Linked from email footer — disables email notifications when clicked.
-exports.unsubscribeEmail = onRequest({ secrets: [] }, async (req, res) => {
-  const uid = req.query.uid;
-  if (!uid) {
+exports.unsubscribeEmail = onRequest({ secrets: [UNSUBSCRIBE_SIGNING_KEY] }, async (req, res) => {
+  const { uid, ts, sig } = req.query;
+  if (!uid || !ts || !sig) {
     res.status(400).send("Invalid link.");
+    return;
+  }
+  const tsNum = Number(ts);
+  if (!Number.isFinite(tsNum) || Date.now() - tsNum > UNSUBSCRIBE_MAX_AGE_MS) {
+    res.status(400).send("This unsubscribe link has expired.");
+    return;
+  }
+  const expectedSig = signUnsubscribe(uid, tsNum, UNSUBSCRIBE_SIGNING_KEY.value());
+  const sigBuf = Buffer.from(sig, "hex");
+  const expectedBuf = Buffer.from(expectedSig, "hex");
+  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
+    res.status(403).send("Invalid or tampered unsubscribe link.");
     return;
   }
   try {
