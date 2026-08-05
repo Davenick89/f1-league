@@ -1,0 +1,250 @@
+// shared.js — Firebase instances, season schedule/constants, and utility
+// functions used across multiple views. Extracted from F1League.jsx as part
+// of the Track C code-split; every lazy-loaded view file imports from here
+// instead of duplicating these definitions.
+import { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
+import { getFunctions } from 'firebase/functions';
+import { getMessaging, onMessage } from 'firebase/messaging';
+import { getAnalytics, logEvent, isSupported as analyticsIsSupported } from 'firebase/analytics';
+
+const firebaseConfig = {
+  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId:             import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId:     import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+};
+
+export const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY;
+
+export const app = initializeApp(firebaseConfig);
+export const auth = getAuth(app);
+setPersistence(auth, browserLocalPersistence).catch(e => console.error("Auth error:", e));
+export const db = getFirestore(app);
+export const functions = getFunctions(app);
+
+// ─── Analytics ────────────────────────────────────────────────────────────────
+// Initialised lazily — GA4 requires a browser environment and a valid
+// measurementId. Falls back to a no-op so missing config never breaks the app.
+let analytics = null;
+analyticsIsSupported().then(supported => {
+  if (supported && import.meta.env.VITE_FIREBASE_MEASUREMENT_ID &&
+      !import.meta.env.VITE_FIREBASE_MEASUREMENT_ID.includes('XXXXXXXXXX')) {
+    analytics = getAnalytics(app);
+  }
+}).catch(() => {});
+
+export function track(eventName, params = {}) {
+  if (!analytics) return;
+  try { logEvent(analytics, eventName, params); } catch (_) {}
+}
+
+// FCM — capability check is cheap and runs eagerly (drives Settings UI).
+// The actual messaging instance is only constructed lazily, the first time
+// enablePushNotifications() runs, since most visitors never open Settings.
+export const fcmSupported = (() => {
+  try {
+    return 'serviceWorker' in navigator && 'Notification' in window;
+  } catch (e) {
+    return false;
+  }
+})();
+let messaging = null;
+export function getMessagingInstance() {
+  if (messaging || !fcmSupported) return messaging;
+  try {
+    messaging = getMessaging(app);
+    // Show in-app notification toasts for foreground messages
+    onMessage(messaging, (payload) => {
+      const { title, body } = payload.notification ?? {};
+      // Foreground FCM messages handled silently — no toast needed
+      // Foreground toast is handled in the Settings UI via a state update
+    });
+  } catch (e) {
+    // FCM not supported in this browser — silent fallback
+  }
+  return messaging;
+}
+
+export const F1_SCHEDULE_2026 = [
+  { round: 1,  name: "Australia",          location: "Melbourne",    date: "2026-03-08", fp1: "2026-03-06T09:30:00Z", fp2: "2026-03-06T13:00:00Z", qualStart: "2026-03-07T06:00:00Z", raceStart: "2026-03-08T04:00:00Z", isSprint: false },
+  { round: 2,  name: "China",              location: "Shanghai",     date: "2026-03-15", fp1: "2026-03-13T10:00:00Z", sprintQualStart: "2026-03-13T13:30:00Z",                                               raceStart: "2026-03-15T07:00:00Z", isSprint: true  },
+  { round: 3,  name: "Japan",              location: "Suzuka",       date: "2026-03-29", fp1: "2026-03-27T10:00:00Z", fp2: "2026-03-27T13:30:00Z", qualStart: "2026-03-28T07:00:00Z", raceStart: "2026-03-29T05:00:00Z", isSprint: false },
+  { round: 4,  name: "Bahrain",            location: "Sakhir",       date: "2026-04-12", fp1: "2026-04-10T14:00:00Z", fp2: "2026-04-10T17:30:00Z", qualStart: "2026-04-11T15:00:00Z", raceStart: "2026-04-12T15:00:00Z", isSprint: false },
+  { round: 5,  name: "Saudi Arabia",       location: "Jeddah",       date: "2026-04-19", fp1: "2026-04-17T17:00:00Z", fp2: "2026-04-17T20:30:00Z", qualStart: "2026-04-18T17:00:00Z", raceStart: "2026-04-19T17:00:00Z", isSprint: false },
+  { round: 6,  name: "Miami",              location: "Miami",        date: "2026-05-03", fp1: "2026-05-01T13:00:00Z", sprintQualStart: "2026-05-01T17:00:00Z",                                               raceStart: "2026-05-03T19:30:00Z", isSprint: true  },
+  { round: 7,  name: "Canada",             location: "Montreal",     date: "2026-05-24", fp1: "2026-05-22T14:00:00Z", sprintQualStart: "2026-05-22T18:00:00Z",                                               raceStart: "2026-05-24T18:00:00Z", isSprint: true  },
+  { round: 8,  name: "Monaco",             location: "Monte Carlo",  date: "2026-06-07", fp1: "2026-06-05T14:00:00Z", fp2: "2026-06-05T17:30:00Z", qualStart: "2026-06-06T13:00:00Z", raceStart: "2026-06-07T13:00:00Z", isSprint: false },
+  { round: 9,  name: "Barcelona-Catalunya",location: "Barcelona",    date: "2026-06-14", fp1: "2026-06-12T13:00:00Z", fp2: "2026-06-12T16:30:00Z", qualStart: "2026-06-13T13:00:00Z", raceStart: "2026-06-14T13:00:00Z", isSprint: false },
+  { round: 10, name: "Austria",            location: "Spielberg",    date: "2026-06-28", fp1: "2026-06-26T14:00:00Z", fp2: "2026-06-26T17:30:00Z", qualStart: "2026-06-27T13:00:00Z", raceStart: "2026-06-28T13:00:00Z", isSprint: false },
+  { round: 11, name: "Great Britain",      location: "Silverstone",  date: "2026-07-05", fp1: "2026-07-03T13:00:00Z", sprintQualStart: "2026-07-03T17:00:00Z",                                               raceStart: "2026-07-05T14:00:00Z", isSprint: true  },
+  { round: 12, name: "Belgium",            location: "Spa",          date: "2026-07-19", fp1: "2026-07-17T14:00:00Z", fp2: "2026-07-17T17:30:00Z", qualStart: "2026-07-18T13:00:00Z", raceStart: "2026-07-19T13:00:00Z", isSprint: false },
+  { round: 13, name: "Hungary",            location: "Budapest",     date: "2026-07-26", fp1: "2026-07-24T14:00:00Z", fp2: "2026-07-24T17:30:00Z", qualStart: "2026-07-25T13:00:00Z", raceStart: "2026-07-26T13:00:00Z", isSprint: false },
+  { round: 14, name: "Netherlands",        location: "Zandvoort",    date: "2026-08-23", fp1: "2026-08-21T14:00:00Z", sprintQualStart: "2026-08-21T18:00:00Z",                                               raceStart: "2026-08-23T13:00:00Z", isSprint: true  },
+  { round: 15, name: "Italy",              location: "Monza",        date: "2026-09-06", fp1: "2026-09-04T13:00:00Z", fp2: "2026-09-04T16:30:00Z", qualStart: "2026-09-05T13:00:00Z", raceStart: "2026-09-06T13:00:00Z", isSprint: false },
+  { round: 16, name: "Spain",              location: "Madrid",       date: "2026-09-13", fp1: "2026-09-11T14:00:00Z", fp2: "2026-09-11T17:30:00Z", qualStart: "2026-09-12T13:00:00Z", raceStart: "2026-09-13T13:00:00Z", isSprint: false },
+  { round: 17, name: "Azerbaijan",         location: "Baku",         date: "2026-09-27", fp1: "2026-09-25T12:00:00Z", fp2: "2026-09-25T15:30:00Z", qualStart: "2026-09-26T11:00:00Z", raceStart: "2026-09-27T11:00:00Z", isSprint: false },
+  { round: 18, name: "Singapore",          location: "Singapore",    date: "2026-10-11", fp1: "2026-10-09T14:00:00Z", sprintQualStart: "2026-10-09T18:00:00Z",                                               raceStart: "2026-10-11T12:00:00Z", isSprint: true  },
+  { round: 19, name: "United States",      location: "Austin",       date: "2026-10-25", fp1: "2026-10-23T12:00:00Z", fp2: "2026-10-23T15:30:00Z", qualStart: "2026-10-24T19:00:00Z", raceStart: "2026-10-25T19:00:00Z", isSprint: false },
+  { round: 20, name: "Mexico",             location: "Mexico City",  date: "2026-11-01", fp1: "2026-10-30T18:00:00Z", fp2: "2026-10-30T21:30:00Z", qualStart: "2026-10-31T20:00:00Z", raceStart: "2026-11-01T20:00:00Z", isSprint: false },
+  { round: 21, name: "Brazil",             location: "São Paulo",    date: "2026-11-08", fp1: "2026-11-06T11:00:00Z", fp2: "2026-11-06T14:30:00Z", qualStart: "2026-11-07T17:00:00Z", raceStart: "2026-11-08T17:00:00Z", isSprint: false },
+  { round: 22, name: "Las Vegas",          location: "Las Vegas",    date: "2026-11-21", fp1: "2026-11-19T22:00:00Z", fp2: "2026-11-20T01:30:00Z", qualStart: "2026-11-21T06:00:00Z", raceStart: "2026-11-22T06:00:00Z", isSprint: false },
+  { round: 23, name: "Qatar",              location: "Lusail",       date: "2026-11-29", fp1: "2026-11-27T15:00:00Z", fp2: "2026-11-27T18:30:00Z", qualStart: "2026-11-28T14:00:00Z", raceStart: "2026-11-29T16:00:00Z", isSprint: false },
+  { round: 24, name: "Abu Dhabi",          location: "Yas Island",   date: "2026-12-06", fp1: "2026-12-04T08:00:00Z", fp2: "2026-12-04T11:30:00Z", qualStart: "2026-12-05T13:00:00Z", raceStart: "2026-12-06T13:00:00Z", isSprint: false },
+];
+
+export const F1_DRIVERS = [
+  "Lando Norris", "Oscar Piastri", "George Russell", "Kimi Antonelli",
+  "Charles Leclerc", "Lewis Hamilton", "Max Verstappen", "Isack Hadjar",
+  "Carlos Sainz", "Alexander Albon", "Fernando Alonso", "Lance Stroll",
+  "Pierre Gasly", "Franco Colapinto", "Oliver Bearman", "Esteban Ocon",
+  "Liam Lawson", "Arvid Lindblad", "Nico Hulkenberg", "Gabriel Bortoleto",
+  "Sergio Perez", "Valtteri Bottas"
+];
+
+export const F1_TEAMS = [
+  "McLaren", "Mercedes", "Ferrari", "Red Bull Racing", "Williams",
+  "Aston Martin", "Alpine", "Haas", "Racing Bulls", "Audi", "Cadillac"
+];
+
+
+export function getCurrentRound() {
+  const now = new Date();
+  const seasonStart = new Date("2026-03-06T00:00:00Z");
+  if (now < seasonStart) return 1;
+  for (let i = F1_SCHEDULE_2026.length - 1; i >= 0; i--) {
+    if (now >= new Date(F1_SCHEDULE_2026[i].date + "T23:59:59Z")) {
+      return Math.min(i + 2, 24);
+    }
+  }
+  return 1;
+}
+
+// Returns the prediction lock time for a race:
+// - Sprint weekends: 30 min before Sprint Qualifying
+// - Normal weekends: 30 min before Qualifying
+// Falls back to 5h before race start if session times are missing.
+// offsetMins: minutes before qualifying session to lock predictions.
+// Defaults to 30; overridden per-league via group.predictionLockOffsetMins.
+// apiSessionStr: validated qualifying start from Jolpica API — overrides hardcoded qualStart
+// when present (more accurate for mid-season schedule changes).
+export function getPredictionLockTime(race, offsetMins = 60, apiSessionStr = null) {
+  if (!race) return null;
+  // API time wins when available; hardcoded is the fallback.
+  const sessionStr = apiSessionStr ?? (race.isSprint ? race.sprintQualStart : race.qualStart);
+  if (sessionStr) return new Date(new Date(sessionStr).getTime() - offsetMins * 60 * 1000);
+  return race.raceStart ? new Date(new Date(race.raceStart).getTime() - 5 * 60 * 60 * 1000) : null;
+}
+
+// Format a Date as IST with a UTC reference, e.g.
+// "Sat, 7 Jun · 6:30 PM IST (13:00 UTC)"
+export function formatLockTimeIST(date) {
+  if (!date) return null;
+  const ist = date.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    weekday: 'short', day: 'numeric', month: 'short',
+    hour: '2-digit', minute: '2-digit', hour12: true,
+  }).replace(/,\s*/g, ', ');
+  const utcH = String(date.getUTCHours()).padStart(2, '0');
+  const utcM = String(date.getUTCMinutes()).padStart(2, '0');
+  return `${ist} IST (${utcH}:${utcM} UTC)`;
+}
+
+export function getTimeUntilLock(race, offsetMins = 60) {
+  const lockTime = getPredictionLockTime(race, offsetMins);
+  if (!lockTime) return "N/A";
+  const diff = lockTime - new Date();
+  if (diff <= 0) return "LOCKED";
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+export function isEditLocked(race, offsetMins = 60) {
+  const lockTime = getPredictionLockTime(race, offsetMins);
+  return lockTime ? new Date() >= lockTime : false;
+}
+
+// Returns the Monday 00:00:00 UTC of the race week — predictions open at this point.
+// Sun race (day=0): daysSinceMonday=6  Mon race (day=1): daysSinceMonday=0  Sat (day=6): daysSinceMonday=5
+export function getPredictionOpenTime(race) {
+  if (!race?.date) return null;
+  const raceDate = new Date(race.date + 'T00:00:00Z');
+  const dayOfWeek = raceDate.getUTCDay();
+  const daysSinceMonday = (dayOfWeek + 6) % 7;
+  return new Date(raceDate.getTime() - daysSinceMonday * 24 * 60 * 60 * 1000);
+}
+
+// Returns display name: custom nickname > first letter of email > "?"
+export function getDisplayName(nickname, googleFirstName, email) {
+  if (nickname && nickname.trim()) return nickname.trim();
+  if (googleFirstName && googleFirstName.trim()) return googleFirstName.trim();
+  if (email) return email.charAt(0).toUpperCase();
+  return '?';
+}
+
+// SCHEDULE SYNC — runs on app load, checks Jolpica API against hardcoded schedule
+export async function syncScheduleWithAPI() {
+  const TOLERANCE_MS = 60 * 60 * 1000; // 1-hour tolerance
+  try {
+    const res = await fetch('https://api.jolpi.ca/ergast/f1/2026.json');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const races = data?.MRData?.RaceTable?.Races;
+    if (!races?.length) return;
+
+    races.forEach(apiRace => {
+      const round = parseInt(apiRace.round);
+      const hardcoded = F1_SCHEDULE_2026.find(r => r.round === round);
+      if (!hardcoded || !apiRace.date || !apiRace.time) return;
+      const apiTime = new Date(`${apiRace.date}T${apiRace.time}`);
+      const hardcodedTime = new Date(hardcoded.raceStart);
+      const diffMs = Math.abs(apiTime - hardcodedTime);
+      if (diffMs > TOLERANCE_MS) {
+        const diffH = Math.round(diffMs / (1000 * 60 * 60));
+        console.error(`[Schedule Sync] R${round} ${hardcoded.name}: timing differs by ~${diffH}h — update F1_SCHEDULE_2026 (API: ${apiTime.toISOString()}, hardcoded: ${hardcodedTime.toISOString()})`);
+      }
+    });
+  } catch (err) {
+    console.error('[Schedule Sync] Error:', err.message);
+  }
+}
+
+export function useF1ApiSchedule(season = 2026) {
+  const [apiData, setApiData] = useState(null);
+  const [apiStatus, setApiStatus] = useState('loading'); // 'loading' | 'ok' | 'error'
+
+  useEffect(() => {
+    const toIso = (obj) => obj?.date && obj?.time ? `${obj.date}T${obj.time}` : null;
+    fetch(`https://api.jolpi.ca/ergast/f1/${season}.json`)
+      .then(r => { if (!r.ok) throw new Error('API error'); return r.json(); })
+      .then(data => {
+        const races = data?.MRData?.RaceTable?.Races;
+        if (!races?.length) { setApiStatus('error'); return; }
+        const schedule = {};
+        races.forEach(race => {
+          const round = parseInt(race.round);
+          schedule[round] = {
+            raceStart: toIso(race),
+            fp2Start: toIso(race.SecondPractice),
+            sprintStart: toIso(race.Sprint),
+            sprintQualifyingStart: toIso(race.SprintQualifying),
+            qualifyingStart: toIso(race.Qualifying),
+          };
+        });
+        setApiData(schedule);
+        setApiStatus('ok');
+      })
+      .catch(() => setApiStatus('error'));
+  }, [season]);
+
+  return { apiData, apiStatus };
+}
