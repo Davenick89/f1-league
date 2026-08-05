@@ -499,13 +499,21 @@ exports.autoOpenRound = onSchedule({ schedule: "every 10 minutes" }, async () =>
       if (currentLockTime && currentLockTime.getTime() > now) continue;
     }
 
-    // Open the target round for this group
-    await db.collection(`groups/${groupDoc.id}/raceStatus`).doc(targetRoundKey).set({
+    // Open the target round for this group.
+    // FIX (post-Track-B audit): these were two independent writes — if the
+    // second failed, raceStatus said the round was open but currentOpenRound
+    // still pointed at the old (closed) round, so isRaceOpen() would block
+    // every player. Admin SDK writes bypass security rules entirely, so
+    // (unlike the client-side batch fixes elsewhere in this pass) there's no
+    // rules-evaluation subtlety here — a plain batch is safe and sufficient.
+    const batch = db.batch();
+    batch.set(db.collection(`groups/${groupDoc.id}/raceStatus`).doc(targetRoundKey), {
       status: "CURRENT",
       isPredictionOpen: true,
       openedAt: new Date().toISOString(),
     }, { merge: true });
-    await db.collection("groups").doc(groupDoc.id).update({ currentOpenRound: targetRoundKey });
+    batch.update(db.collection("groups").doc(groupDoc.id), { currentOpenRound: targetRoundKey });
+    await batch.commit();
     console.log(`[autoOpenRound] Opened ${targetRoundKey} for group ${groupDoc.id}`);
   }
 });
