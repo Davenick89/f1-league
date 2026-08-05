@@ -160,12 +160,27 @@ service cloud.firestore {
       // silent false → "Missing or insufficient permissions" even when the write
       // is otherwise valid. Instead we explicitly verify that admin + name are
       // unchanged, guaranteeing no other meaningful field was modified.
+      //
+      // FIX (post-Track-B audit): this branch only ever checked admin/name
+      // stayed unchanged — currentOpenRound and predictionLockOffsetMins
+      // were unprotected, so a "join" could smuggle in a change to either
+      // in the same write (e.g. currentOpenRound: "round25", which would
+      // break isRaceOpen() for every real member — a denial-of-service via
+      // the join path). Now explicitly requires those unchanged too.
+      //
+      // Note: this still does not verify the joiner holds a genuinely valid
+      // invite for this group — any authenticated user who knows the group
+      // ID can still add themselves. That's a bigger fix (moving invite
+      // redemption to a Cloud Function with real server-side authority to
+      // check it) tracked separately, not done here.
       allow update: if isAuth() && (
         resource.data.admin == uid()
         || (
           // Invite join: user adds exactly themselves, nothing else changes
           request.resource.data.admin == resource.data.admin
           && request.resource.data.name == resource.data.name
+          && request.resource.data.get('currentOpenRound', null) == resource.data.get('currentOpenRound', null)
+          && request.resource.data.get('predictionLockOffsetMins', null) == resource.data.get('predictionLockOffsetMins', null)
           && !resource.data.members.hasAll([uid()])
           && request.resource.data.members.hasAll(resource.data.members)
           && request.resource.data.members.size() == resource.data.members.size() + 1
@@ -190,13 +205,24 @@ service cloud.firestore {
         // FIX (Track B #4): also require that no round other than the
         // group's currentOpenRound changed — closes the gap where any round
         // being open let a client rewrite any *other* (including locked
-        // historical) round's data in the same merge write. New-document
-        // creates have no prior state to protect, so they skip the check.
-        allow create, update: if isAuth() && uid() == userId && isMember(groupId) && isRaceOpen(groupId)
-          && (
-            !exists(/databases/$(database)/documents/groups/$(groupId)/predictions/$(userId))
-            || onlyCurrentRoundChanged(resource.data, request.resource.data, groupData(groupId).currentOpenRound)
-          );
+        // historical) round's data in the same merge write.
+        //
+        // FIX (post-Track-B audit): originally this check was skipped
+        // entirely on create, reasoning that a brand-new document has no
+        // prior state to protect. That missed that a first-ever create can
+        // still include entries for every historical round at once — a
+        // late/never-previously-submitting member could backfill "picks"
+        // for already-decided races with full hindsight, which would then
+        // score if results are ever recalculated. Now the create branch
+        // runs the same onlyCurrentRoundChanged check against an empty
+        // prior state ({}), which correctly requires every round key other
+        // than the current one to be absent, not just unchanged.
+        allow create: if isAuth() && uid() == userId && isMember(groupId) && isRaceOpen(groupId)
+          && !exists(/databases/$(database)/documents/groups/$(groupId)/predictions/$(userId))
+          && onlyCurrentRoundChanged({}, request.resource.data, groupData(groupId).currentOpenRound);
+        allow update: if isAuth() && uid() == userId && isMember(groupId) && isRaceOpen(groupId)
+          && exists(/databases/$(database)/documents/groups/$(groupId)/predictions/$(userId))
+          && onlyCurrentRoundChanged(resource.data, request.resource.data, groupData(groupId).currentOpenRound);
         allow delete: if false;
       }
 
