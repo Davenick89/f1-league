@@ -24,22 +24,40 @@ function GroupStandingBadge({ groupId, userId }) {
   const [standing, setStanding] = React.useState(null);
 
   React.useEffect(() => {
+    // FIX (Track C #15): this badge renders once per league in the
+    // league-selector list, for every visitor, every visit — it used to
+    // fetch every player's entire scores history just to show one user's
+    // rank. Now reads a single precomputed summary doc (written whenever
+    // scores are saved — see ResultsView.jsx / CalendarView.jsx) instead.
+    // Falls back to the old full-collection computation only if no summary
+    // exists yet (e.g. a league that hasn't had results saved since this
+    // shipped) or doesn't have this user's entry, so the badge still works
+    // correctly in that transitional case — just without the perf win
+    // until the next results save populates the summary.
     const load = async () => {
       try {
+        const summarySnap = await getDoc(doc(db, `groups/${groupId}/scores`, 'summary'));
+        const entry = summarySnap.exists() ? summarySnap.data().players?.[userId] : null;
+        if (entry) {
+          setStanding({ rank: entry.rank, pts: entry.totalPoints });
+          return;
+        }
+
         const scoresSnap = await getDocs(collection(db, `groups/${groupId}/scores`));
         let userPts = 0;
         let rank = 1;
-        scoresSnap.docs.forEach(d => {
+        let found = false;
+        scoresSnap.docs.filter(d => d.id !== 'summary').forEach(d => {
           let pts = 0;
           for (let i = 1; i <= 24; i++) pts += d.data()[`round${i}`]?.totalPoints || 0;
-          if (d.id === userId) userPts = pts;
+          if (d.id === userId) { userPts = pts; found = true; }
         });
-        scoresSnap.docs.forEach(d => {
+        scoresSnap.docs.filter(d => d.id !== 'summary').forEach(d => {
           let pts = 0;
           for (let i = 1; i <= 24; i++) pts += d.data()[`round${i}`]?.totalPoints || 0;
           if (pts > userPts) rank++;
         });
-        if (scoresSnap.docs.some(d => d.id === userId)) setStanding({ rank, pts: userPts });
+        if (found) setStanding({ rank, pts: userPts });
       } catch {}
     };
     load();

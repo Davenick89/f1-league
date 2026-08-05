@@ -237,6 +237,33 @@ function ResultsView({ group, user, currentRound }) {
         }, { merge: true });
       }
       await batch.commit();
+
+      // FIX (Track C #15): GroupStandingBadge previously fetched the
+      // *entire* scores collection just to show one player's rank/points
+      // in a small league-list badge — every viewer, every visit. Now that
+      // cost is paid once here (an infrequent admin action), not once per
+      // viewer: re-read the just-updated collection, compute each player's
+      // cumulative total across all rounds and their rank, and persist it
+      // as a single small summary doc. GroupStandingBadge reads that one
+      // doc instead of the whole collection.
+      const freshScoresSnap = await getDocs(collection(db, `groups/${group.id}/scores`));
+      const totals = freshScoresSnap.docs
+        .filter(d => d.id !== 'summary')
+        .map(d => {
+          let pts = 0;
+          for (let i = 1; i <= 24; i++) pts += d.data()[`round${i}`]?.totalPoints || 0;
+          return { userId: d.id, totalPoints: pts };
+        })
+        .sort((a, b) => b.totalPoints - a.totalPoints);
+
+      const summary = {};
+      totals.forEach((p, i) => {
+        summary[p.userId] = { totalPoints: p.totalPoints, rank: i + 1 };
+      });
+      await setDoc(doc(db, `groups/${group.id}/scores`, 'summary'), {
+        players: summary,
+        updatedAt: new Date().toISOString(),
+      });
     } catch (error) {
       console.error("Error calculating scores:", error);
       throw error;

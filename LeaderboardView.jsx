@@ -217,7 +217,11 @@ function LeaderboardView({ group, currentRound, user }) {
 
     const unsubscribe = onSnapshot(collection(db, `groups/${group.id}/scores`), async (snapshot) => {
       try {
-        const leaderboardData = await Promise.all(snapshot.docs.map(async (scoreDoc) => {
+        // FIX (Track C #15): 'summary' is a precomputed rank/total doc
+        // written alongside real per-player score docs (see ResultsView.jsx),
+        // not a player — must be excluded here or it renders as a phantom
+        // "?" entry with 0 points in the standings.
+        const leaderboardData = await Promise.all(snapshot.docs.filter(d => d.id !== 'summary').map(async (scoreDoc) => {
           // Read nickname from predictions doc (readable by all members) instead of
           // users doc (restricted to own doc only after FIX 2)
           let nickname = "?";
