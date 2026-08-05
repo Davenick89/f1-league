@@ -1,8 +1,8 @@
 const { onSchedule } = require("firebase-functions/v2/scheduler");
-const { onRequest } = require("firebase-functions/v2/https");
+const { onRequest, onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
-const { getFirestore } = require("firebase-admin/firestore");
+const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { getAuth } = require("firebase-admin/auth");
 const nodemailer = require("nodemailer");
@@ -557,4 +557,76 @@ exports.unsubscribeEmail = onRequest({ secrets: [UNSUBSCRIBE_SIGNING_KEY] }, asy
     console.error("Unsubscribe error:", err);
     res.status(500).send("Something went wrong. Please try again.");
   }
+});
+
+// ─── Accept invite ──────────────────────────────────────────────────────────
+// FIX (invite-security follow-up to Track B #10 / post-Track-B audit): the
+// old client-side flow let any authenticated user who knew a group ID join
+// directly (updateDoc + arrayUnion), with no verification they actually held
+// a valid invite — the group-update rule only checked that admin/name/etc.
+// stayed unchanged, never that an invite was involved at all. It also needed
+// a client-side transaction + manual retry loop to make the usedCount
+// increment atomic, because Firestore rules don't reliably evaluate
+// arrayUnion inside transactions or auto-retry on a stale exact-equality
+// rules check (both confirmed empirically while building that fix).
+//
+// Moving redemption here removes the vulnerability and the workaround in
+// one step: this runs with Admin SDK privileges, so it bypasses security
+// rules entirely (no rules evaluation, no transform quirks) and can use
+// FieldValue.increment(), which is atomic at the storage layer — no client
+// read-then-write, no retry logic needed. The group-update rule's
+// invite-join branch is removed in the same change, so joining a group's
+// `members` array is no longer possible via any direct client write at all;
+// this function is the only path.
+//
+// Preserves prior behavior: an invite code has no redemption cap (the same
+// code can be shared and used by multiple people), and re-accepting an
+// invite you're already a member of is a no-op, not a double-count.
+// invoker: "public" — without this, the underlying Cloud Run service for a
+// 2nd-gen callable function defaults to denying invocation at the IAM layer
+// before the request ever reaches this code, regardless of the caller's
+// Firebase Auth ID token (confirmed via Cloud Run logs: "The request was
+// not authorized to invoke this service" — an infrastructure-level 401,
+// not the request.auth check below). Real authorization still happens
+// inside the function via request.auth; this only controls whether Cloud
+// Run's own gateway lets the request through to run that check at all.
+exports.acceptInvite = onCall({ invoker: "public" }, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "You must be signed in to accept an invite.");
+  }
+  const uid = request.auth.uid;
+  const code = request.data?.code;
+  if (typeof code !== "string" || !/^[A-Z0-9]{8}$/.test(code.trim().toUpperCase())) {
+    throw new HttpsError("invalid-argument", "Invalid invite code.");
+  }
+  const normalizedCode = code.trim().toUpperCase();
+
+  const db = getFirestore();
+  const inviteRef = db.collection("invites").doc(normalizedCode);
+  const inviteSnap = await inviteRef.get();
+  if (!inviteSnap.exists) {
+    throw new HttpsError("not-found", "This invite link is no longer valid.");
+  }
+  const invite = inviteSnap.data();
+
+  const groupRef = db.collection("groups").doc(invite.leagueId);
+  const groupSnap = await groupRef.get();
+  if (!groupSnap.exists) {
+    throw new HttpsError("not-found", "This league no longer exists.");
+  }
+  const group = groupSnap.data();
+  const alreadyMember = (group.members || []).includes(uid);
+
+  if (!alreadyMember) {
+    const batch = db.batch();
+    batch.update(groupRef, { members: FieldValue.arrayUnion(uid) });
+    batch.update(inviteRef, { usedCount: FieldValue.increment(1) });
+    await batch.commit();
+  }
+
+  return {
+    leagueId: invite.leagueId,
+    leagueName: invite.leagueName || group.name || "F1 League",
+    alreadyMember,
+  };
 });

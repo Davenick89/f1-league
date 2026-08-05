@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayRemove, arrayUnion, serverTimestamp, onSnapshot, Timestamp, runTransaction, writeBatch } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayRemove, serverTimestamp, onSnapshot, Timestamp, writeBatch } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { getAnalytics, logEvent, isSupported as analyticsIsSupported } from 'firebase/analytics';
 import { scoreRace, rfDistance, rfPoints } from './scoring.js';
@@ -24,6 +25,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 setPersistence(auth, browserLocalPersistence).catch(e => console.error("Auth error:", e));
 const db = getFirestore(app);
+const functions = getFunctions(app);
 
 // ─── Analytics ────────────────────────────────────────────────────────────────
 // Initialised lazily — GA4 requires a browser environment and a valid
@@ -645,44 +647,19 @@ export default function F1League() {
     if (!pendingInvite || !user) return;
     try {
       if (!pendingInvite.alreadyMember) {
-        const groupRef = doc(db, "groups", pendingInvite.leagueId);
-        const inviteRef = doc(db, "invites", pendingInvite.code);
-
-        // arrayUnion is already Firestore's atomic "add if missing"
-        // primitive, so the membership write alone was never actually
-        // racy — safe as a plain write.
-        await updateDoc(groupRef, { members: arrayUnion(user.uid) });
-
-        // usedCount is the one genuinely racy part: a plain read-then-+1
-        // can lose an increment under concurrent accepts. A transaction
-        // fixes that atomically — BUT the invites rule checks
-        // usedCount == resource.data.usedCount + 1 by exact equality, and
-        // Firestore's SDK only auto-retries transactions on storage-level
-        // contention, not on a rules rejection caused by a stale read
-        // (confirmed empirically: under real concurrency this surfaces as
-        // permission-denied, not a retryable error, so the SDK gives up
-        // after one attempt even though a fresh re-read would succeed).
-        // Wrapping in our own bounded retry closes that gap — verified
-        // reliable across repeated concurrent-accept tests.
-        let lastErr;
-        for (let attempt = 0; attempt < 5; attempt++) {
-          try {
-            await runTransaction(db, async (transaction) => {
-              const inviteSnap = await transaction.get(inviteRef);
-              if (inviteSnap.exists()) {
-                transaction.update(inviteRef, { usedCount: (inviteSnap.data().usedCount || 0) + 1 });
-              }
-            });
-            lastErr = null;
-            break;
-          } catch (err) {
-            lastErr = err;
-            if (err.code !== "permission-denied") throw err;
-            await new Promise((r) => setTimeout(r, 20 + Math.random() * 30));
-          }
-        }
-        if (lastErr) throw lastErr;
-
+        // FIX (invite-security follow-up): this used to be a direct client
+        // write (updateDoc + arrayUnion on the group, then a transaction +
+        // manual retry loop to atomically increment the invite's
+        // usedCount — see git history for why the retry loop was needed).
+        // Both writes now happen inside the acceptInvite Cloud Function,
+        // which runs with Admin SDK privileges: it verifies the invite
+        // actually exists before adding anyone, and it bypasses security
+        // rules entirely, so FieldValue.increment() is genuinely atomic at
+        // the storage layer with no client-side retry logic needed. The
+        // group-update rule no longer has any branch that permits a direct
+        // client join at all, so this Cloud Function is the only path.
+        const acceptInviteFn = httpsCallable(functions, 'acceptInvite');
+        await acceptInviteFn({ code: pendingInvite.code });
         await loadUserGroups(user.uid);
       }
 
