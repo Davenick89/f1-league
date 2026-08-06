@@ -106,9 +106,15 @@ function validateApiSessionStr(hardcodedStr, apiStr) {
   return diffMs < SCHEDULE_SANITY_MS ? apiStr : null;
 }
 
+// Overridable via env vars for local testing (e.g. pointing OPENF1_BASE_URL
+// at a mock server to exercise the backup path without a live outage).
+// Unset in production — both default to the real hosts.
+const JOLPICA_BASE_URL = process.env.JOLPICA_BASE_URL || "https://api.jolpi.ca";
+const OPENF1_BASE_URL = process.env.OPENF1_BASE_URL || "https://api.openf1.org";
+
 // Primary source. Returns [{ round, qualStart, sprintQualStart }].
 async function fetchJolpicaSchedule() {
-  const res = await fetch("https://api.jolpi.ca/ergast/f1/2026.json?limit=100");
+  const res = await fetch(`${JOLPICA_BASE_URL}/ergast/f1/2026.json?limit=100`);
   if (!res.ok) throw new Error(`Jolpica HTTP ${res.status}`);
   const data = await res.json();
   const races = data?.MRData?.RaceTable?.Races || [];
@@ -135,7 +141,7 @@ async function fetchJolpicaSchedule() {
 // is inferred by ordering meetings by their earliest session date, which
 // is the app's best guess, not a value the API guarantees.
 async function fetchOpenF1Schedule() {
-  const res = await fetch("https://api.openf1.org/v1/sessions?year=2026");
+  const res = await fetch(`${OPENF1_BASE_URL}/v1/sessions?year=2026`);
   if (!res.ok) throw new Error(`OpenF1 HTTP ${res.status}`);
   const sessions = await res.json();
   if (!Array.isArray(sessions) || !sessions.length) throw new Error("OpenF1 returned no sessions");
@@ -195,6 +201,17 @@ exports.refreshScheduleCache = onSchedule({ schedule: "every 60 minutes" }, asyn
   await db.doc(SCHEDULE_CACHE_DOC).set({ overrides, source, fetchedAt: new Date().toISOString() });
   console.log(`[refreshScheduleCache] Cached overrides for ${Object.keys(overrides).length} round(s) from ${source}`);
 });
+
+// Test-only seam for the local emulator: exposes the pure schedule-math
+// helpers so a test script can assert on them directly (e.g. "does an
+// OpenF1-sourced override actually change getPredictionLockTime's output"),
+// without needing to defeat Date.now() or wait for a real race weekend.
+// FUNCTIONS_EMULATOR is set automatically by the Firebase emulator itself
+// and is never "true" in a deployed function, so this block is dead code
+// in production.
+if (process.env.FUNCTIONS_EMULATOR === "true") {
+  exports.__scheduleTestInternals = { getPredictionLockTime, overrideSessionStr, validateApiSessionStr, F1_SCHEDULE_2026 };
+}
 
 async function loadScheduleOverrides(db) {
   try {
