@@ -222,4 +222,60 @@ After Codex finishes, always:
 - **Node:** v20.20.2 (via nvm)
 - **Firebase CLI:** v15.24.0
 
+---
+
+## Session status as of 2026-08-06 (for a fresh Claude Code session picking this up)
+
+Everything below is **shipped, tested, deployed, and pushed to `origin/main`** —
+codebase is in a clean state, nothing mid-flight. Read this section, check
+`git log` for exact commits, and `~/CODEX_MODEL_SOP.md` for VPS tooling notes,
+before assuming anything needs redoing.
+
+**Fully complete:**
+- Track A — lock-time unification (`functions/index.js` now matches the
+  frontend's qualifying-based, per-group-offset logic; root cause of the
+  2026-07-24 incident).
+- Track B — 10 security/correctness fixes from the full Codex audit (rules
+  round-scoping, unsubscribe HMAC token, non-atomic writes → batches, audit
+  log integrity, season-prediction lock, invite race condition, email HTML
+  escaping, scoring display de-dup, validator wiring).
+- Post-Track-B audit fixes — retroactive-scoring gap in the round-scoping
+  rule, group-join field-smuggling, `autoOpenRound` atomicity, and (the
+  bigger one) invite redemption moved to a new `acceptInvite` Cloud
+  Function — closes the "join without a valid invite" gap entirely; the
+  group-update rule no longer has any client-writable path to add members.
+- Track C — code-split `F1League.jsx` (4552 lines → ~1100-line shell +
+  `shared.js` + 9 lazy-loaded view files) and fixed the per-league scores
+  N+1 read (`GroupStandingBadge` now reads one precomputed summary doc).
+
+**VPS tooling set up this session:**
+- Codex CLI has two isolated `CODEX_HOME`s: `~/.codex` (ChatGPT Go login,
+  default — used for this project) and `~/.codex-freebird` (API key, for the
+  separate `free-bird` project). Auto-switches by `cd`, see `~/.bashrc`.
+- Model tiers (Sol/Terra/Luna) and which is reachable on which login — see
+  `~/CODEX_MODEL_SOP.md`.
+- Playwright MCP (browser tools) is registered for Claude Code (`user`
+  scope) and both Codex homes. Chromium + system deps are installed.
+  Claude Code needs a session restart to load newly-registered MCP tools.
+  **Codex needs interactive mode for browser tasks** — non-interactive
+  `codex exec` auto-cancels all MCP tool calls (confirmed open upstream bug,
+  openai/codex#24135, not something to keep re-debugging) — see the SOP
+  file for the full explanation and the reasoning behind that decision.
+
+**Deliberately not done — don't start these without the user re-confirming scope:**
+- Track D (PWA manifest/icons/offline caching) — deferred, never scoped.
+- The driver-performance-graph feature — belongs in a **separate, new chat**,
+  not a continuation of this one (see the saved memory note
+  `sequencing-rebuild-vs-driver-graph` — it should be built against this
+  now-modularized structure, following the `React.lazy` pattern already
+  established by Track C).
+- Known but unfixed: `ResultsView.jsx`'s `calculateAndSaveScores` and
+  `CalendarView.jsx`'s `recalculatePoints` are two independent
+  implementations of the same score-saving logic (one batched, one not) —
+  flagged during Track C, not fixed, worth a proper look.
+- Unexplored: the browser-MCP verification run surfaced real console errors
+  from `syncScheduleWithAPI` showing the hardcoded `F1_SCHEDULE_2026` has
+  drifted from the live Jolpica API starting around round 4 — not
+  investigated, just discovered as a side effect of testing.
+
 To reconnect from phone: SSH → `tmux attach -t f1-league` → `claude`
