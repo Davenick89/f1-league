@@ -226,12 +226,13 @@ After Codex finishes, always:
 
 ## Session status as of 2026-08-06 (for a fresh Claude Code session picking this up)
 
-Everything below is **shipped, tested, deployed, and pushed to `origin/main`** —
-codebase is in a clean state, nothing mid-flight. Read this section, check
-`git log` for exact commits, and `~/CODEX_MODEL_SOP.md` for VPS tooling notes,
-before assuming anything needs redoing.
+**Git is ahead of what's live.** `origin/main` has three commits
+(`1b1d7e9`, `0a92d46`, `f615ae1`, all below) that have **not been deployed**
+yet — `npm run build && firebase deploy` still needs to run from a machine
+with real Firebase credentials (this VPS). Do that first, then read the
+rest of this section before assuming anything needs redoing.
 
-**Fully complete:**
+**Fully complete and previously deployed (before this session's follow-up):**
 - Track A — lock-time unification (`functions/index.js` now matches the
   frontend's qualifying-based, per-group-offset logic; root cause of the
   2026-07-24 incident).
@@ -247,6 +248,59 @@ before assuming anything needs redoing.
 - Track C — code-split `F1League.jsx` (4552 lines → ~1100-line shell +
   `shared.js` + 9 lazy-loaded view files) and fixed the per-league scores
   N+1 read (`GroupStandingBadge` now reads one precomputed summary doc).
+
+**Committed to `origin/main` this session, not yet deployed:**
+- `1b1d7e9` — Track A follow-up. `autoLockRound`/`autoOpenRound`/
+  `sendPredictionReminders` (the actual lock authority per
+  `firestore.rules`' `isRaceOpen()`) previously only read the hardcoded
+  `F1_SCHEDULE_2026` mirror with zero awareness of Jolpica's live
+  qualifying times — same failure class as the 2026-07-24 incident. Added
+  an hourly `refreshScheduleCache` function that fetches Jolpica, validates
+  each round's qualifying/sprint-qualifying time against the hardcoded
+  value (10-day sanity check), and caches only validated overrides to
+  `/system/scheduleCache`; the three lock-gating functions read that cache
+  and fall back to hardcoded data on any miss/failure. Also fixed
+  `syncScheduleWithAPI` to diff qualifying/sprint-qualifying times (the
+  fields locks actually use) instead of only `raceStart` — **this resolves
+  the "hardcoded schedule drifted from live Jolpica API around round 4"
+  item** that was previously flagged as unexplored (see below — it's no
+  longer open). Also extracted `getValidatedApiSessionStr` (`shared.js`)
+  so `CalendarView`/`F1League`'s display-only countdown/lock-state code
+  stays consistent with the save form.
+  **Also collapses `ResultsView`'s `calculateAndSaveScores` and
+  `CalendarView`'s `recalculatePoints` into one `saveRoundScores` helper
+  in `shared.js`** — these were two independent copies of the same
+  score-write + summary-doc logic, one batched, one sequential-per-player.
+  **This resolves the "known but unfixed" duplication item** previously
+  flagged below — it's no longer open.
+- `0a92d46` — Adds `api.openf1.org` as a backup schedule source inside
+  `refreshScheduleCache`, used only when Jolpica itself is unreachable
+  (not for partial drift — that's the `syncScheduleWithAPI` fix above).
+  Round numbers aren't provided by OpenF1 directly; they're inferred by
+  ordering meetings by earliest session date, so the round-inference logic
+  depends on getting the *whole* season's session list, not a partial one.
+- `f615ae1` — Two small, permanent, production-inert test seams added
+  while stress-testing the OpenF1 backup path against a local Firebase
+  emulator (Firestore+Functions+Pub/Sub, fake `demo-` project, zero
+  contact with the real project): `JOLPICA_BASE_URL`/`OPENF1_BASE_URL` env
+  var overrides in `functions/index.js` (default to the real hosts; only
+  ever changed by a gitignored local `.env.local`), and a
+  `__scheduleTestInternals` export gated behind
+  `process.env.FUNCTIONS_EMULATOR === "true"` (set automatically by the
+  Firebase emulator, never true in a deployed function) exposing the pure
+  schedule-math helpers for direct assertions. The actual stress-test
+  harness (mock OpenF1 server, seed script, 40 synthetic leagues/195
+  predictions) was ephemeral scratch work, not committed — if a repeatable
+  regression test is wanted, it needs to be rebuilt from scratch using
+  these two seams as the entry point.
+  Verified: `refreshScheduleCache` correctly falls back to OpenF1 and
+  caches all 24 rounds when Jolpica is down; the real (unmodified)
+  `getPredictionLockTime`, called directly, computed lock times shifted by
+  exactly the injected drift (120min/30min on two test rounds); the real
+  `autoLockRound`/`autoOpenRound` correctly locked/left-open 40 randomly
+  seeded synthetic leagues consistent with that; and with *both* sources
+  down, `refreshScheduleCache` left the existing cache untouched and every
+  function still ran cleanly (no crash, no corruption).
 
 **VPS tooling set up this session:**
 - Codex CLI has two isolated `CODEX_HOME`s: `~/.codex` (ChatGPT Go login,
@@ -269,13 +323,22 @@ before assuming anything needs redoing.
   `sequencing-rebuild-vs-driver-graph` — it should be built against this
   now-modularized structure, following the `React.lazy` pattern already
   established by Track C).
-- Known but unfixed: `ResultsView.jsx`'s `calculateAndSaveScores` and
-  `CalendarView.jsx`'s `recalculatePoints` are two independent
-  implementations of the same score-saving logic (one batched, one not) —
-  flagged during Track C, not fixed, worth a proper look.
-- Unexplored: the browser-MCP verification run surfaced real console errors
-  from `syncScheduleWithAPI` showing the hardcoded `F1_SCHEDULE_2026` has
-  drifted from the live Jolpica API starting around round 4 — not
-  investigated, just discovered as a side effect of testing.
+- ~~Known but unfixed: `ResultsView.jsx`'s `calculateAndSaveScores` and
+  `CalendarView.jsx`'s `recalculatePoints`~~ — fixed in `1b1d7e9` (see
+  above), now one shared `saveRoundScores` helper.
+- ~~Unexplored: hardcoded `F1_SCHEDULE_2026` drifted from live Jolpica API
+  around round 4~~ — fixed in `1b1d7e9` (see above), `syncScheduleWithAPI`
+  now diffs the fields locks actually use.
+- Not yet re-verified with the browser-MCP tooling: the two fixes above
+  were validated via a local Firebase emulator + direct function calls
+  (see `f615ae1` above), not via a live browser pass against the deployed
+  app. Worth a Playwright/browser-MCP smoke pass after deploying, on the
+  same rounds that originally showed the drift console errors.
+- The performance/scale question ("at how many leagues/users would this
+  slow down") was answered architecturally this session, not benchmarked:
+  Firestore scales with per-league member count, not total leagues/users;
+  Track C already fixed the one real N+1; the score-write dedup above
+  removes what would've been the main per-league bottleneck. No actual
+  load test was run — if a hard number matters, one would need to be built.
 
 To reconnect from phone: SSH → `tmux attach -t f1-league` → `claude`
