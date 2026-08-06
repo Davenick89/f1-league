@@ -83,9 +83,9 @@ function getPredictionLockTime(race, offsetMins = 60, apiSessionStr = null) {
 // reality). The frontend already prefers Jolpica's live qualifying time
 // (PredictionView.jsx); this cache brings the backend's actual lock
 // enforcement in line with that. Refreshed hourly — not on the lock
-// functions' 5/10-minute cadence — to keep calls to the third-party API
-// low. On fetch failure the existing cache doc is left untouched, so a
-// Jolpica outage degrades to today's hardcoded-only behavior, never worse.
+// functions' 5/10-minute cadence — to keep calls to third-party APIs low.
+// On total fetch failure the existing cache doc is left untouched, so an
+// outage degrades to today's hardcoded-only behavior, never worse.
 const SCHEDULE_CACHE_DOC = "system/scheduleCache";
 const SCHEDULE_SANITY_MS = 10 * 24 * 60 * 60 * 1000;
 
@@ -95,41 +95,105 @@ function toIsoDateTime(obj) {
 
 // Rejects an API session time that's wildly off from the hardcoded one —
 // catches round-number mismatches (e.g. a cancelled/rescheduled race
-// shifting every later round) rather than trusting it outright.
+// shifting every later round, or — for the OpenF1 backup below — a
+// misordered round inference) rather than trusting it outright. This is
+// the safety net that lets fetchOpenF1Schedule's round-number guess (see
+// below) be wrong without ever corrupting a lock time: a bad guess just
+// fails this check and produces no override, same as no data at all.
 function validateApiSessionStr(hardcodedStr, apiStr) {
   if (!hardcodedStr || !apiStr) return null;
   const diffMs = Math.abs(new Date(apiStr).getTime() - new Date(hardcodedStr).getTime());
   return diffMs < SCHEDULE_SANITY_MS ? apiStr : null;
 }
 
+// Primary source. Returns [{ round, qualStart, sprintQualStart }].
+async function fetchJolpicaSchedule() {
+  const res = await fetch("https://api.jolpi.ca/ergast/f1/2026.json?limit=100");
+  if (!res.ok) throw new Error(`Jolpica HTTP ${res.status}`);
+  const data = await res.json();
+  const races = data?.MRData?.RaceTable?.Races || [];
+  if (!races.length) throw new Error("Jolpica returned no races");
+  return races.map((r) => ({
+    round: parseInt(r.round, 10),
+    qualStart: toIsoDateTime(r.Qualifying),
+    sprintQualStart: toIsoDateTime(r.SprintQualifying),
+  }));
+}
+
+// Backup source — api.openf1.org, free/no-auth — used only when Jolpica is
+// unreachable. UNVERIFIED AGAINST A LIVE RESPONSE: this dev sandbox's
+// network policy blocks arbitrary third-party hosts (confirmed for both
+// api.jolpi.ca and api.openf1.org), so this is built from OpenF1's
+// documented, stable /v1/sessions schema, not a live payload. It only ever
+// runs as a fallback and every value it returns still passes through
+// validateApiSessionStr above, so a schema drift here degrades to "no
+// override" rather than a wrong lock time — but confirm the shape against
+// a real response (e.g. from the VPS, which has normal network access)
+// before leaning on it.
+//
+// OpenF1 doesn't expose an F1-championship round number directly — round
+// is inferred by ordering meetings by their earliest session date, which
+// is the app's best guess, not a value the API guarantees.
+async function fetchOpenF1Schedule() {
+  const res = await fetch("https://api.openf1.org/v1/sessions?year=2026");
+  if (!res.ok) throw new Error(`OpenF1 HTTP ${res.status}`);
+  const sessions = await res.json();
+  if (!Array.isArray(sessions) || !sessions.length) throw new Error("OpenF1 returned no sessions");
+
+  const earliestByMeeting = new Map();
+  sessions.forEach((s) => {
+    if (!s.meeting_key || !s.date_start) return;
+    const existing = earliestByMeeting.get(s.meeting_key);
+    if (!existing || s.date_start < existing) earliestByMeeting.set(s.meeting_key, s.date_start);
+  });
+  const roundByMeeting = new Map(
+    [...earliestByMeeting.entries()]
+      .sort((a, b) => (a[1] < b[1] ? -1 : 1))
+      .map(([meetingKey], i) => [meetingKey, i + 1])
+  );
+
+  const byRound = {};
+  sessions.forEach((s) => {
+    const round = roundByMeeting.get(s.meeting_key);
+    const name = (s.session_name || "").toLowerCase();
+    if (!round || !s.date_start) return;
+    if (!byRound[round]) byRound[round] = { round };
+    if (name === "qualifying") byRound[round].qualStart = s.date_start;
+    if (name === "sprint qualifying" || name === "sprint shootout") byRound[round].sprintQualStart = s.date_start;
+  });
+  return Object.values(byRound);
+}
+
 exports.refreshScheduleCache = onSchedule({ schedule: "every 60 minutes" }, async () => {
   const db = getFirestore();
-  let races;
+  let liveRaces;
+  let source = "jolpica";
   try {
-    const res = await fetch("https://api.jolpi.ca/ergast/f1/2026.json?limit=100");
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    races = data?.MRData?.RaceTable?.Races || [];
+    liveRaces = await fetchJolpicaSchedule();
   } catch (err) {
-    console.error("[refreshScheduleCache] Fetch failed, keeping existing cache:", err.message);
-    return;
+    console.error("[refreshScheduleCache] Jolpica failed, trying OpenF1 backup:", err.message);
+    try {
+      liveRaces = await fetchOpenF1Schedule();
+      source = "openf1";
+    } catch (err2) {
+      console.error("[refreshScheduleCache] OpenF1 backup also failed, keeping existing cache:", err2.message);
+      return;
+    }
   }
-  if (!races.length) return;
 
   const overrides = {};
-  races.forEach((apiRace) => {
-    const round = parseInt(apiRace.round, 10);
-    const hardcoded = F1_SCHEDULE_2026.find((r) => r.round === round);
+  liveRaces.forEach((liveRace) => {
+    const hardcoded = F1_SCHEDULE_2026.find((r) => r.round === liveRace.round);
     if (!hardcoded) return;
-    const qualStart = validateApiSessionStr(hardcoded.qualStart, toIsoDateTime(apiRace.Qualifying));
-    const sprintQualStart = validateApiSessionStr(hardcoded.sprintQualStart, toIsoDateTime(apiRace.SprintQualifying));
+    const qualStart = validateApiSessionStr(hardcoded.qualStart, liveRace.qualStart);
+    const sprintQualStart = validateApiSessionStr(hardcoded.sprintQualStart, liveRace.sprintQualStart);
     if (qualStart || sprintQualStart) {
-      overrides[round] = { ...(qualStart && { qualStart }), ...(sprintQualStart && { sprintQualStart }) };
+      overrides[liveRace.round] = { ...(qualStart && { qualStart }), ...(sprintQualStart && { sprintQualStart }) };
     }
   });
 
-  await db.doc(SCHEDULE_CACHE_DOC).set({ overrides, fetchedAt: new Date().toISOString() });
-  console.log(`[refreshScheduleCache] Cached overrides for ${Object.keys(overrides).length} round(s)`);
+  await db.doc(SCHEDULE_CACHE_DOC).set({ overrides, source, fetchedAt: new Date().toISOString() });
+  console.log(`[refreshScheduleCache] Cached overrides for ${Object.keys(overrides).length} round(s) from ${source}`);
 });
 
 async function loadScheduleOverrides(db) {
