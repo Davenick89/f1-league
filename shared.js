@@ -5,10 +5,11 @@
 import { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { collection, doc, getDocs, getFirestore, setDoc, writeBatch } from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
 import { getMessaging, onMessage } from 'firebase/messaging';
 import { getAnalytics, logEvent, isSupported as analyticsIsSupported } from 'firebase/analytics';
+import { rfDistance, rfPoints, scoreRace } from './scoring.js';
 
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
@@ -141,6 +142,22 @@ export function getPredictionLockTime(race, offsetMins = 60, apiSessionStr = nul
   return race.raceStart ? new Date(new Date(race.raceStart).getTime() - 5 * 60 * 60 * 1000) : null;
 }
 
+// Validates an apiRound's qualifying/sprint-qualifying time against the
+// hardcoded schedule before it's trusted as a lock-time override — catches
+// round-number mismatches (e.g. a cancelled/rescheduled race shifting every
+// later round) that would otherwise silently swap in a wildly wrong lock
+// time. apiRound is one entry of useF1ApiSchedule's apiData map.
+export function getValidatedApiSessionStr(race, apiRound) {
+  if (!race || !apiRound) return null;
+  const hardcodedStr = race.isSprint ? race.sprintQualStart : (race.qualStart ?? race.raceStart);
+  const apiStr = race.isSprint ? apiRound.sprintQualifyingStart : apiRound.qualifyingStart;
+  if (!hardcodedStr || !apiStr) return null;
+  const hardcodedMs = new Date(hardcodedStr).getTime();
+  const apiMs = new Date(apiStr).getTime();
+  const valid = Math.abs(apiMs - hardcodedMs) < 10 * 24 * 60 * 60 * 1000;
+  return valid ? apiStr : null;
+}
+
 // Format a Date as IST with a UTC reference, e.g.
 // "Sat, 7 Jun · 6:30 PM IST (13:00 UTC)"
 export function formatLockTimeIST(date) {
@@ -155,8 +172,8 @@ export function formatLockTimeIST(date) {
   return `${ist} IST (${utcH}:${utcM} UTC)`;
 }
 
-export function getTimeUntilLock(race, offsetMins = 60) {
-  const lockTime = getPredictionLockTime(race, offsetMins);
+export function getTimeUntilLock(race, offsetMins = 60, apiSessionStr = null) {
+  const lockTime = getPredictionLockTime(race, offsetMins, apiSessionStr);
   if (!lockTime) return "N/A";
   const diff = lockTime - new Date();
   if (diff <= 0) return "LOCKED";
@@ -168,8 +185,8 @@ export function getTimeUntilLock(race, offsetMins = 60) {
   return `${minutes}m`;
 }
 
-export function isEditLocked(race, offsetMins = 60) {
-  const lockTime = getPredictionLockTime(race, offsetMins);
+export function isEditLocked(race, offsetMins = 60, apiSessionStr = null) {
+  const lockTime = getPredictionLockTime(race, offsetMins, apiSessionStr);
   return lockTime ? new Date() >= lockTime : false;
 }
 
@@ -201,17 +218,29 @@ export async function syncScheduleWithAPI() {
     const races = data?.MRData?.RaceTable?.Races;
     if (!races?.length) return;
 
+    const toIso = (obj) => obj?.date && obj?.time ? `${obj.date}T${obj.time}` : null;
     races.forEach(apiRace => {
       const round = parseInt(apiRace.round);
       const hardcoded = F1_SCHEDULE_2026.find(r => r.round === round);
-      if (!hardcoded || !apiRace.date || !apiRace.time) return;
-      const apiTime = new Date(`${apiRace.date}T${apiRace.time}`);
-      const hardcodedTime = new Date(hardcoded.raceStart);
-      const diffMs = Math.abs(apiTime - hardcodedTime);
-      if (diffMs > TOLERANCE_MS) {
-        const diffH = Math.round(diffMs / (1000 * 60 * 60));
-        console.error(`[Schedule Sync] R${round} ${hardcoded.name}: timing differs by ~${diffH}h — update F1_SCHEDULE_2026 (API: ${apiTime.toISOString()}, hardcoded: ${hardcodedTime.toISOString()})`);
-      }
+      if (!hardcoded) return;
+      // Check every field getPredictionLockTime() can actually use — qualifying/
+      // sprint-qualifying drive the real lock time; raceStart is only the
+      // fallback when qualifying data is missing. A drift check that only
+      // looked at raceStart (the old behavior) could miss the field that
+      // matters for locking predictions.
+      const checks = [
+        ['raceStart', toIso(apiRace), hardcoded.raceStart],
+        ['qualifying', toIso(apiRace.Qualifying), hardcoded.qualStart],
+        ['sprintQualifying', toIso(apiRace.SprintQualifying), hardcoded.sprintQualStart],
+      ];
+      checks.forEach(([label, apiStr, hardcodedStr]) => {
+        if (!apiStr || !hardcodedStr) return;
+        const diffMs = Math.abs(new Date(apiStr).getTime() - new Date(hardcodedStr).getTime());
+        if (diffMs > TOLERANCE_MS) {
+          const diffH = Math.round(diffMs / (1000 * 60 * 60));
+          console.error(`[Schedule Sync] R${round} ${hardcoded.name} ${label}: differs by ~${diffH}h — update F1_SCHEDULE_2026 (API: ${apiStr}, hardcoded: ${hardcodedStr})`);
+        }
+      });
     });
   } catch (err) {
     console.error('[Schedule Sync] Error:', err.message);
@@ -247,4 +276,59 @@ export function useF1ApiSchedule(season = 2026) {
   }, [season]);
 
   return { apiData, apiStatus };
+}
+
+// Computes and persists every player's score for one round, then refreshes
+// the league's precomputed standings summary doc that GroupStandingBadge
+// reads (see Track C #15). Single write path for both ResultsView's "Save
+// Results" flow and CalendarView's admin "Recalculate" flow — they used to
+// duplicate this ~30-line block, one atomically (batched writes) and one
+// with a sequential per-player await (Track B #7's atomicity fix hadn't
+// reached the second copy).
+// playerEntries: [{ userId, roundData }] — roundData is that player's
+// prediction payload for this round (finisherPosition, pole, etc.), or
+// null/undefined for players who didn't predict this round (skipped).
+export async function saveRoundScores({ db, groupId, roundNum, playerEntries, results, randomNumber, isSprint }) {
+  const roundKey = `round${roundNum}`;
+
+  const withDistance = playerEntries
+    .filter(({ roundData }) => roundData)
+    .map(({ userId, roundData }) => ({
+      userId,
+      roundData,
+      distance: rfDistance(userId, roundData.finisherPosition, results.rPredFinishPositions, randomNumber),
+    }));
+
+  const validDistances = withDistance.filter(p => p.distance !== Infinity).map(p => p.distance);
+  const minDistance = validDistances.length > 0 ? Math.min(...validDistances) : Infinity;
+
+  const batch = writeBatch(db);
+  for (const { userId, roundData, distance } of withDistance) {
+    const { totalPoints, breakdown } = scoreRace(roundData, results, isSprint);
+    const rfPts = rfPoints(distance, minDistance);
+    breakdown.randomFinisher = rfPts;
+    batch.set(doc(db, `groups/${groupId}/scores`, userId), {
+      [roundKey]: { totalPoints: totalPoints + rfPts, breakdown },
+    }, { merge: true });
+  }
+  await batch.commit();
+
+  const freshScoresSnap = await getDocs(collection(db, `groups/${groupId}/scores`));
+  const totals = freshScoresSnap.docs
+    .filter(d => d.id !== 'summary')
+    .map(d => {
+      let pts = 0;
+      for (let i = 1; i <= 24; i++) pts += d.data()[`round${i}`]?.totalPoints || 0;
+      return { userId: d.id, totalPoints: pts };
+    })
+    .sort((a, b) => b.totalPoints - a.totalPoints);
+
+  const summary = {};
+  totals.forEach((p, i) => { summary[p.userId] = { totalPoints: p.totalPoints, rank: i + 1 }; });
+  await setDoc(doc(db, `groups/${groupId}/scores`, 'summary'), {
+    players: summary,
+    updatedAt: new Date().toISOString(),
+  });
+
+  return withDistance.length;
 }

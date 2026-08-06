@@ -7,7 +7,8 @@ import { validateNickname, validateGroupName, validateInviteCode } from './valid
 import { LogOut, Plus, Users, Trophy, BarChart3, Settings, Calendar } from 'lucide-react';
 import {
   auth, db, functions, VAPID_KEY, track, fcmSupported, getMessagingInstance,
-  F1_SCHEDULE_2026, getCurrentRound, getTimeUntilLock, syncScheduleWithAPI,
+  F1_SCHEDULE_2026, getCurrentRound, getTimeUntilLock, getValidatedApiSessionStr,
+  syncScheduleWithAPI, useF1ApiSchedule,
 } from './shared.js';
 
 const AdminWizard = React.lazy(() => import('./AdminWizard.jsx'));
@@ -236,15 +237,18 @@ export default function F1League() {
     return () => unsubscribe();
   }, []);
 
+  const { apiData: headerApiData } = useF1ApiSchedule(2026);
+
   useEffect(() => {
     const race = F1_SCHEDULE_2026[currentRound - 1];
     if (!race) return;
     const offsetMins = selectedGroup?.predictionLockOffsetMins ?? 60;
-    const updateCountdown = () => setCountdown(getTimeUntilLock(race, offsetMins));
+    const apiSessionStr = getValidatedApiSessionStr(race, headerApiData?.[currentRound]);
+    const updateCountdown = () => setCountdown(getTimeUntilLock(race, offsetMins, apiSessionStr));
     updateCountdown();
     const interval = setInterval(updateCountdown, 1000);
     return () => clearInterval(interval);
-  }, [currentRound, selectedGroup?.predictionLockOffsetMins]);
+  }, [currentRound, selectedGroup?.predictionLockOffsetMins, headerApiData]);
 
   // Analytics: track screen views and league entry.
   // These MUST live here (before any conditional returns) — hooks must be

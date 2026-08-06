@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, doc, getDocs, limit, onSnapshot, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
 import { Edit, Lock } from 'lucide-react';
-import { db, F1_DRIVERS, F1_SCHEDULE_2026, useF1ApiSchedule } from './shared.js';
-import { rfDistance, rfPoints, scoreRace } from './scoring.js';
+import { db, F1_DRIVERS, F1_SCHEDULE_2026, saveRoundScores, useF1ApiSchedule } from './shared.js';
 
 function SessionRow({ label, startIso, durationMs, nowTs }) {
   if (!startIso) return null;
@@ -204,65 +203,13 @@ function ResultsView({ group, user, currentRound }) {
       const predictionsSnapshot = await getDocs(
         collection(db, `groups/${group.id}/predictions`)
       );
-
-      // First pass: collect all player data and compute R# distances
-      const playerData = [];
-      for (const predDoc of predictionsSnapshot.docs) {
-        const userId = predDoc.id;
-        const roundData = predDoc.data()[`round${selectedRound}`];
-        if (!roundData) continue;
-        const distance = rfDistance(userId, roundData.finisherPosition, results.rPredFinishPositions, randomNumber);
-        playerData.push({ userId, roundData, distance });
-      }
-
-      // Determine closest distance for competitive R# bonus
-      const validDistances = playerData.filter(p => p.distance !== Infinity).map(p => p.distance);
-      const minDistance = validDistances.length > 0 ? Math.min(...validDistances) : Infinity;
-
-      // Second pass: calculate and save scores.
-      // FIX (Track B #7): was one setDoc await per player in sequence — a
-      // failure partway through left results published with only some
-      // players rescored, with no way to tell from the data alone which
-      // ones. Batched: either every player's score updates together, or
-      // none do (up to Firestore's 500-write batch limit, far above this
-      // app's realistic league size).
-      const batch = writeBatch(db);
-      for (const { userId, roundData, distance } of playerData) {
-        const { totalPoints, breakdown } = scoreRace(roundData, results, race.isSprint);
-        const rfPts = rfPoints(distance, minDistance);
-        breakdown.randomFinisher = rfPts;
-        const scoresRef = doc(db, `groups/${group.id}/scores`, userId);
-        batch.set(scoresRef, {
-          [`round${selectedRound}`]: { totalPoints: totalPoints + rfPts, breakdown }
-        }, { merge: true });
-      }
-      await batch.commit();
-
-      // FIX (Track C #15): GroupStandingBadge previously fetched the
-      // *entire* scores collection just to show one player's rank/points
-      // in a small league-list badge — every viewer, every visit. Now that
-      // cost is paid once here (an infrequent admin action), not once per
-      // viewer: re-read the just-updated collection, compute each player's
-      // cumulative total across all rounds and their rank, and persist it
-      // as a single small summary doc. GroupStandingBadge reads that one
-      // doc instead of the whole collection.
-      const freshScoresSnap = await getDocs(collection(db, `groups/${group.id}/scores`));
-      const totals = freshScoresSnap.docs
-        .filter(d => d.id !== 'summary')
-        .map(d => {
-          let pts = 0;
-          for (let i = 1; i <= 24; i++) pts += d.data()[`round${i}`]?.totalPoints || 0;
-          return { userId: d.id, totalPoints: pts };
-        })
-        .sort((a, b) => b.totalPoints - a.totalPoints);
-
-      const summary = {};
-      totals.forEach((p, i) => {
-        summary[p.userId] = { totalPoints: p.totalPoints, rank: i + 1 };
-      });
-      await setDoc(doc(db, `groups/${group.id}/scores`, 'summary'), {
-        players: summary,
-        updatedAt: new Date().toISOString(),
+      const playerEntries = predictionsSnapshot.docs.map((predDoc) => ({
+        userId: predDoc.id,
+        roundData: predDoc.data()[`round${selectedRound}`],
+      }));
+      await saveRoundScores({
+        db, groupId: group.id, roundNum: selectedRound, playerEntries,
+        results, randomNumber, isSprint: race.isSprint,
       });
     } catch (error) {
       console.error("Error calculating scores:", error);

@@ -69,10 +69,83 @@ const F1_SCHEDULE_2026 = [
 // passed. Now mirrors F1League.jsx's getPredictionLockTime() exactly: locks
 // before Qualifying (or Sprint Qualifying), using the per-group
 // predictionLockOffsetMins setting instead of a hardcoded offset.
-function getPredictionLockTime(race, offsetMins = 60) {
-  const sessionStr = race.isSprint ? race.sprintQualStart : race.qualStart;
+function getPredictionLockTime(race, offsetMins = 60, apiSessionStr = null) {
+  const sessionStr = apiSessionStr ?? (race.isSprint ? race.sprintQualStart : race.qualStart);
   if (sessionStr) return new Date(new Date(sessionStr).getTime() - offsetMins * 60 * 1000);
   return race.raceStart ? new Date(new Date(race.raceStart).getTime() - 5 * 60 * 60 * 1000) : null;
+}
+
+// ─── Live schedule cache ────────────────────────────────────────────────────
+// FIX (session 2026-08-06, Track A follow-up): autoLockRound/autoOpenRound/
+// sendPredictionReminders had zero live-schedule awareness — only
+// F1_SCHEDULE_2026 above, hand-maintained, same failure class as the
+// 2026-07-24 incident (root cause was this file's schedule disagreeing with
+// reality). The frontend already prefers Jolpica's live qualifying time
+// (PredictionView.jsx); this cache brings the backend's actual lock
+// enforcement in line with that. Refreshed hourly — not on the lock
+// functions' 5/10-minute cadence — to keep calls to the third-party API
+// low. On fetch failure the existing cache doc is left untouched, so a
+// Jolpica outage degrades to today's hardcoded-only behavior, never worse.
+const SCHEDULE_CACHE_DOC = "system/scheduleCache";
+const SCHEDULE_SANITY_MS = 10 * 24 * 60 * 60 * 1000;
+
+function toIsoDateTime(obj) {
+  return obj?.date && obj?.time ? `${obj.date}T${obj.time}` : null;
+}
+
+// Rejects an API session time that's wildly off from the hardcoded one —
+// catches round-number mismatches (e.g. a cancelled/rescheduled race
+// shifting every later round) rather than trusting it outright.
+function validateApiSessionStr(hardcodedStr, apiStr) {
+  if (!hardcodedStr || !apiStr) return null;
+  const diffMs = Math.abs(new Date(apiStr).getTime() - new Date(hardcodedStr).getTime());
+  return diffMs < SCHEDULE_SANITY_MS ? apiStr : null;
+}
+
+exports.refreshScheduleCache = onSchedule({ schedule: "every 60 minutes" }, async () => {
+  const db = getFirestore();
+  let races;
+  try {
+    const res = await fetch("https://api.jolpi.ca/ergast/f1/2026.json?limit=100");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    races = data?.MRData?.RaceTable?.Races || [];
+  } catch (err) {
+    console.error("[refreshScheduleCache] Fetch failed, keeping existing cache:", err.message);
+    return;
+  }
+  if (!races.length) return;
+
+  const overrides = {};
+  races.forEach((apiRace) => {
+    const round = parseInt(apiRace.round, 10);
+    const hardcoded = F1_SCHEDULE_2026.find((r) => r.round === round);
+    if (!hardcoded) return;
+    const qualStart = validateApiSessionStr(hardcoded.qualStart, toIsoDateTime(apiRace.Qualifying));
+    const sprintQualStart = validateApiSessionStr(hardcoded.sprintQualStart, toIsoDateTime(apiRace.SprintQualifying));
+    if (qualStart || sprintQualStart) {
+      overrides[round] = { ...(qualStart && { qualStart }), ...(sprintQualStart && { sprintQualStart }) };
+    }
+  });
+
+  await db.doc(SCHEDULE_CACHE_DOC).set({ overrides, fetchedAt: new Date().toISOString() });
+  console.log(`[refreshScheduleCache] Cached overrides for ${Object.keys(overrides).length} round(s)`);
+});
+
+async function loadScheduleOverrides(db) {
+  try {
+    const snap = await db.doc(SCHEDULE_CACHE_DOC).get();
+    return snap.exists ? (snap.data().overrides || {}) : {};
+  } catch (err) {
+    console.error("[loadScheduleOverrides] Read failed, falling back to hardcoded schedule:", err.message);
+    return {};
+  }
+}
+
+function overrideSessionStr(race, overrides) {
+  const o = overrides[race.round];
+  if (!o) return null;
+  return (race.isSprint ? o.sprintQualStart : o.qualStart) || null;
 }
 
 // Mirrors F1League.jsx's getPredictionOpenTime(): Monday 00:00 UTC of race
@@ -268,10 +341,11 @@ exports.sendPredictionReminders = onSchedule(
     const db = getFirestore();
     const messaging = getMessaging();
     const now = Date.now();
+    const scheduleOverrides = await loadScheduleOverrides(db);
 
     // Races whose lock time falls within the next 50 minutes
     const upcomingRaces = F1_SCHEDULE_2026.filter((race) => {
-      const lockTime = getPredictionLockTime(race);
+      const lockTime = getPredictionLockTime(race, 60, overrideSessionStr(race, scheduleOverrides));
       if (!lockTime) return false;
       const ms = lockTime.getTime() - now;
       return ms > 0 && ms <= 50 * 60 * 1000;
@@ -296,7 +370,7 @@ exports.sendPredictionReminders = onSchedule(
     });
 
     for (const race of upcomingRaces) {
-      const lockTime = getPredictionLockTime(race);
+      const lockTime = getPredictionLockTime(race, 60, overrideSessionStr(race, scheduleOverrides));
       const minsUntilLock = Math.floor((lockTime.getTime() - now) / 60000);
       const roundKey = `round${race.round}`;
       const sessionLabel = race.isSprint ? "Sprint Qualifying" : "FP2";
@@ -418,6 +492,7 @@ exports.sendPredictionReminders = onSchedule(
 exports.autoLockRound = onSchedule({ schedule: "every 5 minutes" }, async () => {
   const db = getFirestore();
   const now = Date.now();
+  const scheduleOverrides = await loadScheduleOverrides(db);
 
   const groupsSnap = await db.collection("groups").get();
 
@@ -432,7 +507,7 @@ exports.autoLockRound = onSchedule({ schedule: "every 5 minutes" }, async () => 
 
     // Per-group offset — defaults to 60 to match F1League.jsx's default.
     const offsetMins = groupData.predictionLockOffsetMins ?? 60;
-    const lockTime = getPredictionLockTime(race, offsetMins);
+    const lockTime = getPredictionLockTime(race, offsetMins, overrideSessionStr(race, scheduleOverrides));
     if (!lockTime || lockTime.getTime() > now) continue; // Not yet time to lock
 
     const statusRef = db.collection(`groups/${groupDoc.id}/raceStatus`).doc(currentOpenRound);
@@ -465,6 +540,7 @@ exports.autoLockRound = onSchedule({ schedule: "every 5 minutes" }, async () => 
 exports.autoOpenRound = onSchedule({ schedule: "every 10 minutes" }, async () => {
   const db = getFirestore();
   const now = Date.now();
+  const scheduleOverrides = await loadScheduleOverrides(db);
 
   const groupsSnap = await db.collection("groups").get();
 
@@ -475,7 +551,7 @@ exports.autoOpenRound = onSchedule({ schedule: "every 10 minutes" }, async () =>
     // Earliest race whose lock time is still in the future AND whose
     // race-week has actually started = round to open for this group.
     const targetRace = F1_SCHEDULE_2026.find(race => {
-      const lockTime = getPredictionLockTime(race, offsetMins);
+      const lockTime = getPredictionLockTime(race, offsetMins, overrideSessionStr(race, scheduleOverrides));
       const openTime = getPredictionOpenTime(race);
       return lockTime && lockTime.getTime() > now && (!openTime || openTime.getTime() <= now);
     });
@@ -495,7 +571,9 @@ exports.autoOpenRound = onSchedule({ schedule: "every 10 minutes" }, async () =>
     if (currentOpenRound) {
       const currentRoundNum = parseInt(currentOpenRound.replace("round", ""), 10);
       const currentRace = F1_SCHEDULE_2026.find(r => r.round === currentRoundNum);
-      const currentLockTime = currentRace ? getPredictionLockTime(currentRace, offsetMins) : null;
+      const currentLockTime = currentRace
+        ? getPredictionLockTime(currentRace, offsetMins, overrideSessionStr(currentRace, scheduleOverrides))
+        : null;
       if (currentLockTime && currentLockTime.getTime() > now) continue;
     }
 

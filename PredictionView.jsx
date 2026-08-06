@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, doc, getDoc, setDoc, onSnapshot, serverTimestamp, Timestamp, writeBatch } from 'firebase/firestore';
 import { Edit, Info, Lock, X } from 'lucide-react';
-import { db, functions, F1_DRIVERS, formatLockTimeIST, getDisplayName, getPredictionLockTime, getPredictionOpenTime, track, useF1ApiSchedule } from './shared.js';
+import { db, functions, F1_DRIVERS, formatLockTimeIST, getDisplayName, getPredictionLockTime, getPredictionOpenTime, getValidatedApiSessionStr, track, useF1ApiSchedule } from './shared.js';
 import { rfDistance, rfPoints, scoreRace } from './scoring.js';
 import { validatePredictions } from './validation.js';
 
@@ -523,23 +523,10 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
 
   // ── Lock logic ──────────────────────────────────────────────────────────
   // Prefer Jolpica API qualifying time over hardcoded — more accurate for the
-  // actual 2026 schedule. Apply same 10-day sanity check used in ResultsView
-  // to catch round-number mismatches (e.g. if a race was cancelled/rescheduled).
+  // actual 2026 schedule. getValidatedApiSessionStr applies a 10-day sanity
+  // check to catch round-number mismatches (e.g. a cancelled/rescheduled race).
   const lockOffsetMins = group?.predictionLockOffsetMins ?? 60;
-
-  const _apiRound = apiData?.[currentRound];
-  const _hardcodedSessionMs = race
-    ? new Date(race.isSprint ? race.sprintQualStart : (race.qualStart ?? race.raceStart)).getTime()
-    : null;
-  const _apiSessionStr = race?.isSprint
-    ? _apiRound?.sprintQualifyingStart
-    : _apiRound?.qualifyingStart;
-  const _apiSessionMs = _apiSessionStr ? new Date(_apiSessionStr).getTime() : null;
-  const _apiSessionValid = _hardcodedSessionMs && _apiSessionMs
-    ? Math.abs(_apiSessionMs - _hardcodedSessionMs) < 10 * 24 * 60 * 60 * 1000
-    : false;
-  const validatedApiSessionStr = _apiSessionValid ? _apiSessionStr : null;
-
+  const validatedApiSessionStr = getValidatedApiSessionStr(race, apiData?.[currentRound]);
   const lockTime = getPredictionLockTime(race, lockOffsetMins, validatedApiSessionStr);
   const timeLocked = lockTime ? Date.now() >= lockTime.getTime() : false;
   const adminOverrideOpen = raceStatus?.isPredictionOpen === true;

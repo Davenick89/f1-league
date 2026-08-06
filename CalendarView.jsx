@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { collection, doc, getDoc, getDocs, setDoc } from 'firebase/firestore';
-import { db, F1_SCHEDULE_2026, getPredictionLockTime, getTimeUntilLock, isEditLocked } from './shared.js';
-import { rfDistance, rfPoints, scoreRace } from './scoring.js';
+import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
+import { db, F1_SCHEDULE_2026, getPredictionLockTime, getTimeUntilLock, getValidatedApiSessionStr, isEditLocked, saveRoundScores, useF1ApiSchedule } from './shared.js';
 
 function CalendarView({ group, user, currentRound }) {
   const [loading, setLoading] = useState(true);
@@ -13,6 +12,7 @@ function CalendarView({ group, user, currentRound }) {
   const [filter, setFilter] = useState('all');
   const [currentCountdown, setCurrentCountdown] = useState('');
   const [refreshTick, setRefreshTick] = useState(0);
+  const { apiData } = useF1ApiSchedule(2026);
 
   useEffect(() => {
     if (!group) return;
@@ -60,11 +60,13 @@ function CalendarView({ group, user, currentRound }) {
   useEffect(() => {
     const race = F1_SCHEDULE_2026[currentRound - 1];
     if (!race) return;
-    const update = () => setCurrentCountdown(getTimeUntilLock(race));
+    const offsetMins = group?.predictionLockOffsetMins ?? 60;
+    const apiSessionStr = getValidatedApiSessionStr(race, apiData?.[currentRound]);
+    const update = () => setCurrentCountdown(getTimeUntilLock(race, offsetMins, apiSessionStr));
     update();
     const interval = setInterval(update, 1000);
     return () => clearInterval(interval);
-  }, [currentRound]);
+  }, [currentRound, group?.predictionLockOffsetMins, apiData]);
 
   const getRaceStatus = (round) => {
     if (round < currentRound) return 'past';
@@ -88,52 +90,17 @@ function CalendarView({ group, user, currentRound }) {
       const randSnap = await getDoc(doc(db, `groups/${group.id}/randomNumbers`, `round${race.round}`));
       const raceRandomNumber = randSnap.exists() ? randSnap.data().number : null;
       const roundKey = `round${race.round}`;
-      let saved = 0;
 
-      // First pass: collect player data and compute R# distances
-      const playerEntries = Object.entries(allPredictions)
-        .map(([uid, predData]) => {
-          const roundData = predData[roundKey];
-          if (!roundData) return null;
-          const distance = rfDistance(uid, roundData.finisherPosition, raceResults.rPredFinishPositions, raceRandomNumber);
-          return { uid, roundData, distance };
-        })
-        .filter(Boolean);
-
-      // Determine closest distance for competitive R# bonus
-      const validDistances = playerEntries.filter(p => p.distance !== Infinity).map(p => p.distance);
-      const minDistance = validDistances.length > 0 ? Math.min(...validDistances) : Infinity;
-
-      // Second pass: calculate and save scores
-      for (const { uid, roundData, distance } of playerEntries) {
-        const { totalPoints, breakdown } = scoreRace(roundData, raceResults, race.isSprint);
-        const rfPts = rfPoints(distance, minDistance);
-        breakdown.randomFinisher = rfPts;
-        const scoresRef = doc(db, `groups/${group.id}/scores`, uid);
-        await setDoc(scoresRef, { [roundKey]: { totalPoints: totalPoints + rfPts, breakdown } }, { merge: true });
-        saved++;
-      }
-
-      // FIX (Track C #15): this is a second, independent score-writing path
-      // (the "Recalculate" admin feature) from the one in ResultsView.jsx's
-      // calculateAndSaveScores — keeping GroupStandingBadge's summary doc
-      // fresh means both paths need to update it, or recalculating here
-      // would silently leave the summary stale after the next results save
-      // reads it. See ResultsView.jsx for the fuller explanation.
-      const freshScoresSnap = await getDocs(collection(db, `groups/${group.id}/scores`));
-      const totals = freshScoresSnap.docs
-        .filter(d => d.id !== 'summary')
-        .map(d => {
-          let pts = 0;
-          for (let i = 1; i <= 24; i++) pts += d.data()[`round${i}`]?.totalPoints || 0;
-          return { userId: d.id, totalPoints: pts };
-        })
-        .sort((a, b) => b.totalPoints - a.totalPoints);
-      const summary = {};
-      totals.forEach((p, i) => { summary[p.userId] = { totalPoints: p.totalPoints, rank: i + 1 }; });
-      await setDoc(doc(db, `groups/${group.id}/scores`, 'summary'), {
-        players: summary,
-        updatedAt: new Date().toISOString(),
+      // Same write path as ResultsView.jsx's "Save Results" flow (shared.js's
+      // saveRoundScores) — this used to be a second, independent copy of that
+      // logic with a sequential per-player await instead of a batch.
+      const playerEntries = Object.entries(allPredictions).map(([uid, predData]) => ({
+        userId: uid,
+        roundData: predData[roundKey],
+      }));
+      const saved = await saveRoundScores({
+        db, groupId: group.id, roundNum: race.round, playerEntries,
+        results: raceResults, randomNumber: raceRandomNumber, isSprint: race.isSprint,
       });
 
       setCalcMsg(prev => ({ ...prev, [race.round]: `✅ Points saved for ${saved} players` }));
@@ -272,7 +239,8 @@ function CalendarView({ group, user, currentRound }) {
 
   const renderCurrentDetails = (race) => {
     const offsetMins = group?.predictionLockOffsetMins ?? 60;
-    const locked = isEditLocked(race, offsetMins);
+    const apiSessionStr = getValidatedApiSessionStr(race, apiData?.[race.round]);
+    const locked = isEditLocked(race, offsetMins, apiSessionStr);
     const offsetLabel = offsetMins >= 60 ? `${offsetMins / 60}h` : `${offsetMins}min`;
     return (
       <div className="mt-3 pt-3 border-t border-gray-700">
@@ -293,7 +261,8 @@ function CalendarView({ group, user, currentRound }) {
 
   const renderUpcomingDetails = (race) => {
     const offsetMins = group?.predictionLockOffsetMins ?? 60;
-    const lockTime = getPredictionLockTime(race, offsetMins);
+    const apiSessionStr = getValidatedApiSessionStr(race, apiData?.[race.round]);
+    const lockTime = getPredictionLockTime(race, offsetMins, apiSessionStr);
     const fmtOpts = { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' };
     const offsetLabel = offsetMins >= 60 ? `${offsetMins / 60}h` : `${offsetMins}min`;
     const lockLabel = race.isSprint ? `${offsetLabel} before Sprint Qualifying` : `${offsetLabel} before Qualifying`;
