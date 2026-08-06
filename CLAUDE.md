@@ -226,14 +226,14 @@ After Codex finishes, always:
 
 ## Session status as of 2026-08-06 (for a fresh Claude Code session picking this up)
 
-**Git is ahead of what's live.** `origin/main` has three commits
-(`1b1d7e9`, `0a92d46`, `f615ae1`, all below) that have **not been deployed**
-yet — `npm run build && firebase deploy` still needs to run from a machine
-with real Firebase credentials (this VPS). Do that first, then read the
-rest of this section before assuming anything needs redoing.
+**Everything below is deployed and committed** (`origin/main` @ `db5ab43`,
+which includes the earlier `1b1d7e9`/`0a92d46`/`f615ae1` commits this
+session started by pulling and deploying). Nothing mid-flight — read this
+section, check `git log`, then pick up with the "Next session" list at the
+bottom rather than assuming anything here needs redoing.
 
-**Fully complete and previously deployed (before this session's follow-up):**
-- Track A — lock-time unification (`functions/index.js` now matches the
+**Fully complete and deployed:**
+- Track A — lock-time unification (`functions/index.js` matches the
   frontend's qualifying-based, per-group-offset logic; root cause of the
   2026-07-24 incident).
 - Track B — 10 security/correctness fixes from the full Codex audit (rules
@@ -241,68 +241,76 @@ rest of this section before assuming anything needs redoing.
   log integrity, season-prediction lock, invite race condition, email HTML
   escaping, scoring display de-dup, validator wiring).
 - Post-Track-B audit fixes — retroactive-scoring gap in the round-scoping
-  rule, group-join field-smuggling, `autoOpenRound` atomicity, and (the
-  bigger one) invite redemption moved to a new `acceptInvite` Cloud
-  Function — closes the "join without a valid invite" gap entirely; the
-  group-update rule no longer has any client-writable path to add members.
+  rule, group-join field-smuggling, `autoOpenRound` atomicity, invite
+  redemption moved to a new `acceptInvite` Cloud Function.
 - Track C — code-split `F1League.jsx` (4552 lines → ~1100-line shell +
   `shared.js` + 9 lazy-loaded view files) and fixed the per-league scores
-  N+1 read (`GroupStandingBadge` now reads one precomputed summary doc).
+  N+1 read (`GroupStandingBadge` reads one precomputed summary doc).
+- Track A follow-up (`1b1d7e9`) — added hourly `refreshScheduleCache`
+  (fetches Jolpica, validates against hardcoded, caches overrides to
+  `/system/scheduleCache`; the three lock-gating functions read it with
+  fallback to hardcoded data). Fixed `syncScheduleWithAPI` to diff
+  qualifying/sprint-qualifying times, not just `raceStart`. Collapsed
+  `ResultsView`'s `calculateAndSaveScores` and `CalendarView`'s
+  `recalculatePoints` into one `saveRoundScores` helper in `shared.js`.
+- OpenF1 backup source (`0a92d46`) added to `refreshScheduleCache` for when
+  Jolpica itself is unreachable, plus test-only seams (`f615ae1`,
+  `JOLPICA_BASE_URL`/`OPENF1_BASE_URL` env overrides and
+  `__scheduleTestInternals`, gated behind `FUNCTIONS_EMULATOR`, both
+  production-inert).
 
-**Committed to `origin/main` this session, not yet deployed:**
-- `1b1d7e9` — Track A follow-up. `autoLockRound`/`autoOpenRound`/
-  `sendPredictionReminders` (the actual lock authority per
-  `firestore.rules`' `isRaceOpen()`) previously only read the hardcoded
-  `F1_SCHEDULE_2026` mirror with zero awareness of Jolpica's live
-  qualifying times — same failure class as the 2026-07-24 incident. Added
-  an hourly `refreshScheduleCache` function that fetches Jolpica, validates
-  each round's qualifying/sprint-qualifying time against the hardcoded
-  value (10-day sanity check), and caches only validated overrides to
-  `/system/scheduleCache`; the three lock-gating functions read that cache
-  and fall back to hardcoded data on any miss/failure. Also fixed
-  `syncScheduleWithAPI` to diff qualifying/sprint-qualifying times (the
-  fields locks actually use) instead of only `raceStart` — **this resolves
-  the "hardcoded schedule drifted from live Jolpica API around round 4"
-  item** that was previously flagged as unexplored (see below — it's no
-  longer open). Also extracted `getValidatedApiSessionStr` (`shared.js`)
-  so `CalendarView`/`F1League`'s display-only countdown/lock-state code
-  stays consistent with the save form.
-  **Also collapses `ResultsView`'s `calculateAndSaveScores` and
-  `CalendarView`'s `recalculatePoints` into one `saveRoundScores` helper
-  in `shared.js`** — these were two independent copies of the same
-  score-write + summary-doc logic, one batched, one sequential-per-player.
-  **This resolves the "known but unfixed" duplication item** previously
-  flagged below — it's no longer open.
-- `0a92d46` — Adds `api.openf1.org` as a backup schedule source inside
-  `refreshScheduleCache`, used only when Jolpica itself is unreachable
-  (not for partial drift — that's the `syncScheduleWithAPI` fix above).
-  Round numbers aren't provided by OpenF1 directly; they're inferred by
-  ordering meetings by earliest session date, so the round-inference logic
-  depends on getting the *whole* season's session list, not a partial one.
-- `f615ae1` — Two small, permanent, production-inert test seams added
-  while stress-testing the OpenF1 backup path against a local Firebase
-  emulator (Firestore+Functions+Pub/Sub, fake `demo-` project, zero
-  contact with the real project): `JOLPICA_BASE_URL`/`OPENF1_BASE_URL` env
-  var overrides in `functions/index.js` (default to the real hosts; only
-  ever changed by a gitignored local `.env.local`), and a
-  `__scheduleTestInternals` export gated behind
-  `process.env.FUNCTIONS_EMULATOR === "true"` (set automatically by the
-  Firebase emulator, never true in a deployed function) exposing the pure
-  schedule-math helpers for direct assertions. The actual stress-test
-  harness (mock OpenF1 server, seed script, 40 synthetic leagues/195
-  predictions) was ephemeral scratch work, not committed — if a repeatable
-  regression test is wanted, it needs to be rebuilt from scratch using
-  these two seams as the entry point.
-  Verified: `refreshScheduleCache` correctly falls back to OpenF1 and
-  caches all 24 rounds when Jolpica is down; the real (unmodified)
-  `getPredictionLockTime`, called directly, computed lock times shifted by
-  exactly the injected drift (120min/30min on two test rounds); the real
-  `autoLockRound`/`autoOpenRound` correctly locked/left-open 40 randomly
-  seeded synthetic leagues consistent with that; and with *both* sources
-  down, `refreshScheduleCache` left the existing cache untouched and every
-  function still ran cleanly (no crash, no corruption).
+**This session's work (`db5ab43`) — the hardcoded schedule was itself
+wrong, not just the lock-gating logic:**
+- **Root cause found:** Bahrain and Saudi Arabia GPs were cancelled in the
+  real 2026 season (Middle East conflict) and F1 later relocated a
+  "Bahrain Grand Prix" to Sepang, Malaysia in October rather than
+  restoring either race — the season is 23 rounds, not 24. `F1_SCHEDULE_2026`
+  (hardcoded in both `functions/index.js` and `shared.js`, and indexed
+  directly by the frontend for round name/date display) was never updated
+  after the cancellation, so every round from 4 onward was off by 2 versus
+  reality. **Rebuilt both copies against live Jolpica data** to match the
+  real calendar. Every consumer of the old hardcoded round count
+  (`getCurrentRound`, season-total loops, "next round" gates in
+  `ResultsView.jsx`, UI labels in `CalendarView.jsx`/`F1League.jsx`) now
+  derives from `F1_SCHEDULE_2026.length` instead of a literal `24`, so a
+  further disruption in the region — plausible, not hypothetical — doesn't
+  require another hunt through magic numbers.
+- **OpenF1 fallback was silently non-functional**, verified live: two
+  separate round-inference bugs (pre-season testing weekends, and meetings
+  for the cancelled races still counted) both inflated the round count and
+  shifted every later round. Neither was ever a corruption risk — the
+  sanity check rejected every resulting mismatch — but it meant the
+  fallback produced zero usable overrides. Fixed by filtering testing
+  meetings by name (`/v1/meetings`) and cancelled meetings via
+  `is_cancelled`; verified all 23 rounds now resolve correctly against
+  live `api.openf1.org`.
+- **Tightened the schedule-drift sanity check from 10 to 3 days**
+  everywhere it appears (`functions/index.js`'s `SCHEDULE_SANITY_MS`,
+  `shared.js`'s `getValidatedApiSessionStr`, `ResultsView.jsx`'s inline
+  check) — verified live that the 10-day window silently accepted several
+  round-shifted mismatches; the season's tightest real gap between two
+  different rounds is 7 days, largest legitimate same-round time
+  correction seen was ~1 day.
+- **Hardened `syncScheduleWithAPI`** to flag a calendar size mismatch or an
+  orphaned round number loudly (distinct console.error), instead of
+  silently no-oping the way it did for months on the Bahrain/Saudi
+  cancellation — the intent is that the *next* calendar disruption gets
+  caught fast, not months later.
+- **Migrated the one live league's Firestore data**
+  (`group_1772707723293`, "F1 Karvaan") to match the renumbered schedule:
+  old round6..14 → round4..12 across `predictions`, `scores`, `results`,
+  `raceStatus`, `randomNumbers`, and `currentOpenRound`; the two
+  orphaned/unscored round4-5 (Bahrain/Saudi — predictions were opened and
+  locked on schedule but nobody submitted anything, and no results/scores
+  ever existed for them) `raceStatus` shells deleted. Backed up the full
+  group data first (Admin SDK snapshot, since this Firebase CLI version
+  has no `firestore:export` and `gcloud`/`gsutil` aren't installed on this
+  VPS) to `security/backups/*.json` — gitignored, not committed, kept
+  locally as a rollback point and audit trail.
+- Deployed: hosting, all 6 Cloud Functions (including new
+  `refreshScheduleCache`), Firestore rules.
 
-**VPS tooling set up this session:**
+**VPS tooling set up in an earlier session:**
 - Codex CLI has two isolated `CODEX_HOME`s: `~/.codex` (ChatGPT Go login,
   default — used for this project) and `~/.codex-freebird` (API key, for the
   separate `free-bird` project). Auto-switches by `cd`, see `~/.bashrc`.
@@ -316,29 +324,40 @@ rest of this section before assuming anything needs redoing.
   openai/codex#24135, not something to keep re-debugging) — see the SOP
   file for the full explanation and the reasoning behind that decision.
 
-**Deliberately not done — don't start these without the user re-confirming scope:**
-- Track D (PWA manifest/icons/offline caching) — deferred, never scoped.
-- The driver-performance-graph feature — belongs in a **separate, new chat**,
-  not a continuation of this one (see the saved memory note
-  `sequencing-rebuild-vs-driver-graph` — it should be built against this
-  now-modularized structure, following the `React.lazy` pattern already
+**Next session — user explicitly asked to continue with these tomorrow:**
+- **Track D** (PWA manifest/icons/offline caching) — deferred, never scoped,
+  but now the named priority for the next session.
+- **The migration script** (`security/backups/migrate-schedule-renumber.cjs`)
+  — used once already (see above), user wants to revisit it tomorrow.
+  Decide: keep as a reusable/generalized tool (currently hardcoded to one
+  `groupId` and one specific old→new round map — fine for a single
+  emergency migration, not written to be reused as-is for a future
+  disruption), or archive it now that this migration is done. The backup
+  JSON it was run against is in the same gitignored directory.
+
+**Also still open, lower priority:**
+- **Live browser smoke test never done.** Every fix this session and last
+  was verified via direct API calls, a local Firebase emulator, or Admin
+  SDK reads/writes — not a live pass through the actual deployed app.
+  Specifically worth checking: the calendar/current-round display for
+  round12 (should read Netherlands, not Spain) and the round16 Malaysia
+  entry, since those are the two things a browser pass would catch that
+  nothing else in this session's verification would.
+- **`refreshScheduleCache`'s first live run not yet confirmed.** It's
+  newly deployed on an hourly schedule; worth checking
+  `/system/scheduleCache` in Firestore populates correctly from Jolpica in
+  production (only tested the logic locally against live API responses,
+  not the deployed function itself).
+- The driver-performance-graph feature — belongs in a **separate, new
+  chat**, not a continuation of this one (see the saved memory note
+  `sequencing-rebuild-vs-driver-graph` — build it against the
+  now-modularized structure, following the `React.lazy` pattern
   established by Track C).
-- ~~Known but unfixed: `ResultsView.jsx`'s `calculateAndSaveScores` and
-  `CalendarView.jsx`'s `recalculatePoints`~~ — fixed in `1b1d7e9` (see
-  above), now one shared `saveRoundScores` helper.
-- ~~Unexplored: hardcoded `F1_SCHEDULE_2026` drifted from live Jolpica API
-  around round 4~~ — fixed in `1b1d7e9` (see above), `syncScheduleWithAPI`
-  now diffs the fields locks actually use.
-- Not yet re-verified with the browser-MCP tooling: the two fixes above
-  were validated via a local Firebase emulator + direct function calls
-  (see `f615ae1` above), not via a live browser pass against the deployed
-  app. Worth a Playwright/browser-MCP smoke pass after deploying, on the
-  same rounds that originally showed the drift console errors.
 - The performance/scale question ("at how many leagues/users would this
-  slow down") was answered architecturally this session, not benchmarked:
-  Firestore scales with per-league member count, not total leagues/users;
-  Track C already fixed the one real N+1; the score-write dedup above
-  removes what would've been the main per-league bottleneck. No actual
-  load test was run — if a hard number matters, one would need to be built.
+  slow down") was answered architecturally, not benchmarked: Firestore
+  scales with per-league member count, not total leagues/users; Track C
+  already fixed the one real N+1; the score-write dedup fixed the main
+  per-league bottleneck. No actual load test was run — if a hard number
+  matters, one would need to be built.
 
 To reconnect from phone: SSH → `tmux attach -t f1-league` → `claude`
