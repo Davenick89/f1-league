@@ -34,3 +34,6 @@ service-account.json
 
 # Logs
 functions/firebase-debug.log
+
+# Firestore backups (contain real user data — never commit)
+security/backups/

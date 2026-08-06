@@ -36,14 +36,16 @@ function ResultsView({ group, user, currentRound }) {
   // IMPORTANT: validate API date against hardcoded before trusting it.
   // The Jolpica API uses the real-world 2026 calendar round numbers, which can
   // diverge from our hardcoded numbers if races are cancelled or rescheduled
-  // mid-season. If the API's raceStart differs from hardcoded by more than 10
+  // mid-season. If the API's raceStart differs from hardcoded by more than 3
   // days, the round numbers have shifted — discard the API data for this round
   // and fall back to hardcoded so the 24-hour lock calculates correctly.
+  // (Tightened from 10 to 3 days, session 2026-08-06 — see
+  // getValidatedApiSessionStr in shared.js for why 10 days was unsafe.)
   const apiRound = apiData?.[selectedRound];
   const _hardcodedMs = race?.raceStart ? new Date(race.raceStart).getTime() : null;
   const _apiMs = apiRound?.raceStart ? new Date(apiRound.raceStart).getTime() : null;
   const apiRoundValid = _hardcodedMs && _apiMs
-    ? Math.abs(_apiMs - _hardcodedMs) < 10 * 24 * 60 * 60 * 1000
+    ? Math.abs(_apiMs - _hardcodedMs) < 3 * 24 * 60 * 60 * 1000
     : false;
   const raceStartStr = (apiRoundValid ? apiRound?.raceStart : null) ?? race?.raceStart ?? null;
   const sprintStartStr = apiRoundValid ? (apiRound?.sprintStart ?? null) : null;
@@ -275,7 +277,7 @@ function ResultsView({ group, user, currentRound }) {
         closedBy: user.uid
       }, { merge: true });
 
-      if (nextRound <= 24) {
+      if (nextRound <= F1_SCHEDULE_2026.length) {
         batch.set(statusRef(nextRound), {
           status: 'CURRENT',
           isPredictionOpen: true,
@@ -289,14 +291,14 @@ function ResultsView({ group, user, currentRound }) {
       batch.set(doc(db, `groups/${group.id}/systemLogs`, `endWeekend_${selectedRound}_${Date.now()}`), {
         event: 'END_WEEKEND',
         closedRound: selectedRound,
-        openedRound: nextRound <= 24 ? nextRound : null,
+        openedRound: nextRound <= F1_SCHEDULE_2026.length ? nextRound : null,
         triggeredBy: user.uid,
         timestamp: new Date().toISOString()
       });
 
       await batch.commit();
 
-      const nextRaceName = nextRound <= 24 ? F1_SCHEDULE_2026[nextRound - 1]?.name : null;
+      const nextRaceName = nextRound <= F1_SCHEDULE_2026.length ? F1_SCHEDULE_2026[nextRound - 1]?.name : null;
       const nextMsg = nextRaceName ? ` ${nextRaceName} (R${nextRound}) is now open!` : " Season complete!";
       setMessage(`✅ Weekend closed: Round ${selectedRound} locked.${nextMsg}`);
       setTimeout(() => { setMessage(""); window.location.reload(); }, 3000);
@@ -693,7 +695,7 @@ function ResultsView({ group, user, currentRound }) {
                 <div className="bg-gray-900 border-2 border-red-600 rounded-lg p-6 w-full max-w-md">
                   <h3 className="text-xl font-bold text-white mb-3">Close Round {selectedRound}?</h3>
                   <p className="text-gray-300 text-sm mb-4">
-                    This will close Round {selectedRound} ({race?.name}) and open Round {selectedRound + 1}{selectedRound + 1 <= 24 ? ` (${F1_SCHEDULE_2026[selectedRound]?.name})` : ""} for predictions.
+                    This will close Round {selectedRound} ({race?.name}) and open Round {selectedRound + 1}{selectedRound + 1 <= F1_SCHEDULE_2026.length ? ` (${F1_SCHEDULE_2026[selectedRound]?.name})` : ""} for predictions.
                   </p>
                   <ul className="text-sm text-gray-400 space-y-1 mb-6 ml-2">
                     <li>✓ Lock Round {selectedRound} permanently</li>

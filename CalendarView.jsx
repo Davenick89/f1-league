@@ -302,7 +302,7 @@ function CalendarView({ group, user, currentRound }) {
 
       <div className="flex gap-2 mb-5 flex-wrap">
         {[
-          { key: 'all', label: 'All (24)' },
+          { key: 'all', label: `All (${F1_SCHEDULE_2026.length})` },
           { key: 'past', label: `Past (${pastCount})` },
           { key: 'current', label: 'Current' },
           { key: 'upcoming', label: `Upcoming (${upcomingCount})` },

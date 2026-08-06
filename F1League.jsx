@@ -50,12 +50,12 @@ function GroupStandingBadge({ groupId, userId }) {
         let found = false;
         scoresSnap.docs.filter(d => d.id !== 'summary').forEach(d => {
           let pts = 0;
-          for (let i = 1; i <= 24; i++) pts += d.data()[`round${i}`]?.totalPoints || 0;
+          for (let i = 1; i <= F1_SCHEDULE_2026.length; i++) pts += d.data()[`round${i}`]?.totalPoints || 0;
           if (d.id === userId) { userPts = pts; found = true; }
         });
         scoresSnap.docs.filter(d => d.id !== 'summary').forEach(d => {
           let pts = 0;
-          for (let i = 1; i <= 24; i++) pts += d.data()[`round${i}`]?.totalPoints || 0;
+          for (let i = 1; i <= F1_SCHEDULE_2026.length; i++) pts += d.data()[`round${i}`]?.totalPoints || 0;
           if (pts > userPts) rank++;
         });
         if (found) setStanding({ rank, pts: userPts });
@@ -923,7 +923,7 @@ function LandingPage({ handleGoogleSignIn }) {
             </a>
           </div>
           <div className="lp-fade mt-20 grid grid-cols-3 gap-6 max-w-xs mx-auto" style={{ animationDelay: '0.65s' }}>
-            {[['24','RACES'],['22','DRIVERS'],['6','SPRINT WKS']].map(([v,l]) => (
+            {[[String(F1_SCHEDULE_2026.length),'RACES'],['22','DRIVERS'],['6','SPRINT WKS']].map(([v,l]) => (
               <div key={l} className="text-center">
                 <div className="text-2xl font-black" style={{ color: '#DC0000', fontFamily: 'Orbitron' }}>{v}</div>
                 <div className="text-xs text-gray-600 tracking-widest mt-1">{l}</div>
