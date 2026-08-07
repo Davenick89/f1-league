@@ -216,9 +216,22 @@ function LeaderboardView({ group, currentRound, user }) {
   useEffect(() => {
     if (!group) return;
 
+    // FIX (post-Track-D audit): Firestore's first onSnapshot callback fires
+    // from local cache (fromCache: true) before the server round-trip lands,
+    // even on a fully healthy connection — setting the banner directly off
+    // that first callback made it flash briefly on every fresh mount. Debounce
+    // it: only show the banner if still cache-only after a short grace period,
+    // long enough for a normal server round-trip to have already flipped it off.
+    let cacheFlashTimer = null;
+
     const unsubscribe = onSnapshot(collection(db, `groups/${group.id}/scores`), async (snapshot) => {
       try {
-        setIsShowingCachedData(snapshot.metadata.fromCache);
+        clearTimeout(cacheFlashTimer);
+        if (snapshot.metadata.fromCache) {
+          cacheFlashTimer = setTimeout(() => setIsShowingCachedData(true), 600);
+        } else {
+          setIsShowingCachedData(false);
+        }
         // FIX (Track C #15): 'summary' is a precomputed rank/total doc
         // written alongside real per-player score docs (see ResultsView.jsx),
         // not a player — must be excluded here or it renders as a phantom
@@ -245,7 +258,10 @@ function LeaderboardView({ group, currentRound, user }) {
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(cacheFlashTimer);
+      unsubscribe();
+    };
   }, [group, currentRound]);
 
   return (

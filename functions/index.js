@@ -413,7 +413,7 @@ function buildEmailHtml({ raceName, raceRound, minsUntilLock, lockTime, isSprint
 
 // ─── Send email with up to 3 retries ──────────────────────────────────────────
 async function sendReminderEmail({ transporter, to, race, minsUntilLock, lockTime, predictions, leagueName, totalPoints, leagueRank, unsubscribeUrl }) {
-  const sessionLabel = race.isSprint ? "Sprint Qualifying" : "FP2";
+  const sessionLabel = race.isSprint ? "Sprint Qualifying" : "Qualifying";
   const html = buildEmailHtml({
     raceName: race.name,
     raceRound: race.round,
@@ -485,7 +485,7 @@ exports.sendPredictionReminders = onSchedule(
       const lockTime = getPredictionLockTime(race, 60, overrideSessionStr(race, scheduleOverrides));
       const minsUntilLock = Math.floor((lockTime.getTime() - now) / 60000);
       const roundKey = `round${race.round}`;
-      const sessionLabel = race.isSprint ? "Sprint Qualifying" : "FP2";
+      const sessionLabel = race.isSprint ? "Sprint Qualifying" : "Qualifying";
 
       for (const [uid, userData] of userMap) {
         const reminderMins = userData.notificationSettings?.reminderMinutesBefore ?? 30;
@@ -495,25 +495,33 @@ exports.sendPredictionReminders = onSchedule(
         // Only fire during the 5-minute window before the user's chosen reminder time
         if (minsUntilLock > reminderMins || minsUntilLock < reminderMins - 5) continue;
 
-        // Load groups and predictions for this user (shared for both push + email)
+        // Load groups and predictions for this user (shared for both push + email).
+        // FIX (post-Track-D audit): used to `break` after the first group, so a
+        // player in 2+ leagues could have their reminder silently suppressed by
+        // an unrelated already-complete league (or shown that league's stats
+        // while a *different* league was actually the one still open). Now
+        // checks every membership and only treats the round as done once every
+        // group is — the reminder content uses the first still-incomplete group.
         const groupsSnap = await db.collection("groups").where("members", "array-contains", uid).get();
-        let hasPredictions = false;
+        let hasPredictions = groupsSnap.docs.length > 0;
         let predictions = null;
         let leagueName = "F1 Karvaan";
         let totalPoints = 0;
         let leagueRank = null;
+        let pickedIncompleteGroup = false;
 
         for (const groupDoc of groupsSnap.docs) {
           const predDoc = await db.collection(`groups/${groupDoc.id}/predictions`).doc(uid).get();
           const roundPred = predDoc.exists ? predDoc.data()?.[roundKey] : null;
-          if (roundPred?.pole) {
-            hasPredictions = true;
-            predictions = roundPred;
-          } else {
-            predictions = roundPred || {};
-          }
+          const groupComplete = !!roundPred?.pole;
+          if (!groupComplete) hasPredictions = false;
 
-          // Grab league name, total season points, and rank for email
+          // Use the first still-incomplete group for the reminder's content —
+          // once we've picked one, stop overwriting it with a later group's data.
+          if (pickedIncompleteGroup) continue;
+          if (!groupComplete) pickedIncompleteGroup = true;
+
+          predictions = roundPred || {};
           leagueName = groupDoc.data().name || leagueName;
           const scoresSnap = await db.collection(`groups/${groupDoc.id}/scores`).get();
           const allTotals = scoresSnap.docs.map(d => ({
@@ -523,7 +531,6 @@ exports.sendPredictionReminders = onSchedule(
           const myEntry = allTotals.find(e => e.uid === uid);
           totalPoints = myEntry?.pts ?? 0;
           leagueRank = allTotals.findIndex(e => e.uid === uid) + 1 || null;
-          break; // use first group
         }
 
         if (hasPredictions) continue;
@@ -600,6 +607,15 @@ exports.sendPredictionReminders = onSchedule(
 // Runs every 5 minutes. For each group, if the current open round's lock time
 // has passed and predictions are still open, closes them. Idempotent — skips
 // groups where isPredictionOpen is already false.
+//
+// FIX (post-Track-D audit): this used to lock the instant the *original*
+// lock time was in the past, with no awareness of an admin's active
+// overrideExpiresAt window (PredictionView.jsx's handleUnlockPredictions).
+// Since an admin can only unlock a round *after* its lock time has already
+// passed, that meant the very next 5-minute tick — not 15 minutes later —
+// killed the override. Now mirrors the frontend's own auto-lock condition
+// (PredictionView.jsx's countdown effect): only force-lock once there's no
+// override in flight, or once one has actually expired.
 
 exports.autoLockRound = onSchedule({ schedule: "every 5 minutes" }, async () => {
   const db = getFirestore();
@@ -627,6 +643,12 @@ exports.autoLockRound = onSchedule({ schedule: "every 5 minutes" }, async () => 
 
     // Already locked — nothing to do
     if (!statusSnap.exists || statusSnap.data().isPredictionOpen !== true) continue;
+
+    // An admin override window is active and hasn't expired yet — respect it.
+    // The client's own countdown (or this same function, next tick, once
+    // overrideExpiresAt has passed) is responsible for locking it.
+    const overrideExpiresAt = statusSnap.data().overrideExpiresAt;
+    if (overrideExpiresAt && overrideExpiresAt.toMillis() > now) continue;
 
     await statusRef.set({ isPredictionOpen: false, lockedAt: new Date().toISOString() }, { merge: true });
     console.log(`[autoLockRound] Locked ${currentOpenRound} for group ${groupDoc.id}`);
@@ -793,30 +815,40 @@ exports.acceptInvite = onCall({ invoker: "public" }, async (request) => {
 
   const db = getFirestore();
   const inviteRef = db.collection("invites").doc(normalizedCode);
-  const inviteSnap = await inviteRef.get();
-  if (!inviteSnap.exists) {
-    throw new HttpsError("not-found", "This invite link is no longer valid.");
-  }
-  const invite = inviteSnap.data();
 
-  const groupRef = db.collection("groups").doc(invite.leagueId);
-  const groupSnap = await groupRef.get();
-  if (!groupSnap.exists) {
-    throw new HttpsError("not-found", "This league no longer exists.");
-  }
-  const group = groupSnap.data();
-  const alreadyMember = (group.members || []).includes(uid);
+  // FIX (post-Track-D audit): the member check and the usedCount increment
+  // used to be a plain read followed by a separate batch write — two
+  // concurrent redemptions by the same user (double-click, two tabs) could
+  // both read alreadyMember === false before either write landed, so both
+  // would increment usedCount even though arrayUnion left only one member.
+  // A transaction makes the read-then-write atomic so a race collapses into
+  // the same no-op-if-already-a-member behavior as a single request.
+  const { leagueId, leagueName, group, alreadyMember } = await db.runTransaction(async (tx) => {
+    const inviteSnap = await tx.get(inviteRef);
+    if (!inviteSnap.exists) {
+      throw new HttpsError("not-found", "This invite link is no longer valid.");
+    }
+    const invite = inviteSnap.data();
 
-  if (!alreadyMember) {
-    const batch = db.batch();
-    batch.update(groupRef, { members: FieldValue.arrayUnion(uid) });
-    batch.update(inviteRef, { usedCount: FieldValue.increment(1) });
-    await batch.commit();
-  }
+    const groupRef = db.collection("groups").doc(invite.leagueId);
+    const groupSnap = await tx.get(groupRef);
+    if (!groupSnap.exists) {
+      throw new HttpsError("not-found", "This league no longer exists.");
+    }
+    const group = groupSnap.data();
+    const alreadyMember = (group.members || []).includes(uid);
+
+    if (!alreadyMember) {
+      tx.update(groupRef, { members: FieldValue.arrayUnion(uid) });
+      tx.update(inviteRef, { usedCount: FieldValue.increment(1) });
+    }
+
+    return { leagueId: invite.leagueId, leagueName: invite.leagueName, group, alreadyMember };
+  });
 
   return {
-    leagueId: invite.leagueId,
-    leagueName: invite.leagueName || group.name || "F1 League",
+    leagueId,
+    leagueName: leagueName || group.name || "F1 League",
     alreadyMember,
   };
 });

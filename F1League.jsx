@@ -226,22 +226,16 @@ export default function F1League() {
           }
         }
 
-        // Legacy direct-join flow: ?join={groupId} — keep for existing links
-        const legacyGroupId = params.get('join');
-        if (legacyGroupId) {
-          const groupRef = doc(db, "groups", legacyGroupId);
-          const groupDoc = await getDoc(groupRef);
-          if (groupDoc.exists()) {
-            const groupData = groupDoc.data();
-            const members = groupData.members || [];
-            if (!members.includes(authUser.uid)) {
-              members.push(authUser.uid);
-              await updateDoc(groupRef, { members });
-            }
-            setSelectedGroup({ id: legacyGroupId, ...groupData, members });
-            window.history.replaceState({}, document.title, window.location.pathname);
-          }
-        }
+        // FIX (post-Track-D audit): the old ?join={groupId} direct-write flow
+        // is removed — firestore.rules' groups match only permits a *member*
+        // to read the group doc (line 143) and only permits a member update
+        // that removes themselves, never a non-admin adding a new uid (line
+        // 179+). For the one case this path existed for — a non-member
+        // opening an old link — both the read and the write were already
+        // silently denied, so it could never actually add anyone. Removed
+        // rather than "fixed," since there's no old-groupId → invite-code
+        // mapping to redirect through; anyone with a stale link needs a
+        // fresh invite from the league admin.
       } else {
         setUser(null);
         setGroups([]);

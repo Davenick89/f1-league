@@ -296,7 +296,17 @@ function CalendarView({ group, user, currentRound }) {
       <div className="flex items-center justify-between mb-4 gap-3">
         <h2 className="text-2xl font-bold" style={{ fontFamily: "'Orbitron'" }}>🗓️ 2026 F1 CALENDAR</h2>
         <div className="flex items-center gap-2">
-          {!isOnline && lastSyncedAt && <span className="text-xs text-yellow-400 text-right">Offline — showing data from last sync at {lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
+          {/* FIX (post-Track-D audit): used to require lastSyncedAt truthy, so a tab's
+              first-ever load happening while offline (data still served from Firestore's
+              persistent cache) showed no indicator at all. Falls back to a generic message
+              when there's no prior-successful-load timestamp yet. */}
+          {!isOnline && (
+            <span className="text-xs text-yellow-400 text-right">
+              {lastSyncedAt
+                ? `Offline — showing data from last sync at ${lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                : 'Offline — showing cached data'}
+            </span>
+          )}
           <button
             onClick={() => setRefreshTick(t => t + 1)}
             className="px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded border border-gray-700 transition"

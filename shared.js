@@ -5,7 +5,7 @@
 import { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { collection, doc, getDocs, initializeFirestore, persistentLocalCache, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, getDocs, initializeFirestore, onSnapshot, persistentLocalCache, setDoc, writeBatch } from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
 import { getMessaging, onMessage } from 'firebase/messaging';
 import { getAnalytics, logEvent, isSupported as analyticsIsSupported } from 'firebase/analytics';
@@ -46,6 +46,43 @@ export function useOnlineStatus() {
   }, []);
 
   return isOnline;
+}
+
+// FIX (post-Track-D audit): navigator.onLine only reflects whether a network
+// interface is up, not whether Firestore is actually reachable — a player on
+// a dead/degraded Wi-Fi uplink or behind a captive portal can pass the
+// useOnlineStatus() gate. Combined with persistentLocalCache(), setDoc()
+// resolves as soon as a write is durably queued locally, before any server
+// round-trip — so a caller that shows "saved" on setDoc() resolving alone can
+// tell a player their prediction is locked in when it's only queued, and if
+// it doesn't sync until after the round locks, firestore.rules silently
+// rejects it with nothing surfacing the failure. This waits for the write's
+// own snapshot to confirm hasPendingWrites === false (i.e., the server has
+// it) before the caller treats it as truly saved, so a caller can tell a
+// merely-queued write apart from a confirmed one instead of asserting success
+// for both.
+export function waitForServerAck(docRef, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let unsubscribe = () => {};
+
+    // unsubscribe is called from inside callbacks that may fire before the
+    // onSnapshot() call below returns and assigns it — guard with a wrapper
+    // rather than referencing the outer const directly (TDZ/undefined risk).
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      unsubscribe();
+      resolve(result);
+    };
+
+    const timer = setTimeout(() => finish(false), timeoutMs);
+
+    unsubscribe = onSnapshot(docRef, { includeMetadataChanges: true }, (snapshot) => {
+      if (!snapshot.metadata.hasPendingWrites) finish(true);
+    }, () => finish(false));
+  });
 }
 
 // ─── Analytics ────────────────────────────────────────────────────────────────
