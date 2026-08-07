@@ -36,6 +36,7 @@ A React single-page app for running an F1 predictions league among friends. Play
 | `.claude/launch.json` | Dev server configs for Claude Code browser preview |
 | `security/INCIDENT_RESPONSE.md` | Rollback procedures, deploy-phase checklists, backup/restore commands |
 | `security/backup.sh`, `security/integrity-check.cjs` | Firestore backup and document-count integrity check |
+| `security/e2e-test-signin.cjs` | Mints a Firebase custom auth token for a dedicated, isolated test account + throwaway league — the way to drive authenticated in-app flows headlessly, since real Google OAuth can't be scripted. Full recipe (including the app-name/reload gotchas) is in the script's header comment |
 
 There is no test suite (no test runner configured in `package.json` or `functions/package.json`).
 
