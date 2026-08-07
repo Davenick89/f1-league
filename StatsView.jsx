@@ -42,6 +42,28 @@ function Select({ value, onChange, children, className = '', disabled = false })
   return <select value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} className={`bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white disabled:opacity-50 ${className}`}>{children}</select>;
 }
 
+// FIX (post-user-feedback): every section used to always render — user
+// asked for each data section to be individually hideable, both to declutter
+// and specifically because "Qualifying vs race" wasn't reading as clearly
+// useful to them. `headerExtra` (the Drivers/Constructors toggle on Points
+// progression) is a sibling of the collapse button, not a child of it, so
+// clicking those controls doesn't also collapse the section.
+function CollapsibleSection({ title, headerExtra, defaultOpen = true, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className={card}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-2 text-left">
+          <span className={`text-gray-500 text-xs inline-block transition-transform ${open ? '' : '-rotate-90'}`}>▼</span>
+          <h2 className="font-bold text-white">{title}</h2>
+        </button>
+        {headerExtra}
+      </div>
+      {open && <div className="mt-4">{children}</div>}
+    </section>
+  );
+}
+
 export default function StatsView({ series }) {
   const [stats, setStats] = useState(null);
   const [error, setError] = useState('');
@@ -70,11 +92,12 @@ export default function StatsView({ series }) {
   // from Jolpica's full ~78-circuit all-time list, but that's overkill for
   // a fan-facing picker — nobody needs 1950s-era defunct circuits in the
   // dropdown. Settled on the current season's actual calendar instead (23
-  // circuits): fetches the season schedule directly (same endpoint
-  // refreshDriverStatsCache uses to find candidate rounds), independent of
-  // driverStats' own backlog state, and lists every round on the calendar
-  // — including ones that haven't happened yet — since the lookup itself
-  // (getDriverCircuitHistory) is all-time regardless of what's cached.
+  // circuits, plus each one's country): fetches the season schedule
+  // directly (same endpoint refreshDriverStatsCache uses to find candidate
+  // rounds), independent of driverStats' own backlog state, and lists
+  // every round on the calendar — including ones that haven't happened
+  // yet — since the lookup itself (getDriverCircuitHistory) is all-time
+  // regardless of what's cached.
   useEffect(() => {
     if (!stats?.season) return;
     let cancelled = false;
@@ -83,8 +106,8 @@ export default function StatsView({ series }) {
       .then((data) => {
         if (cancelled) return;
         const races = data?.MRData?.RaceTable?.Races || [];
-        const list = [...new Map(races.filter((race) => race.Circuit).map((race) => [race.Circuit.circuitId, race.Circuit.circuitName])).entries()]
-          .map(([id, name]) => ({ id, name }))
+        const list = [...new Map(races.filter((race) => race.Circuit).map((race) => [race.Circuit.circuitId, { name: race.Circuit.circuitName, country: race.Circuit.Location?.country }])).entries()]
+          .map(([id, { name, country }]) => ({ id, name, country }))
           .sort((a, b) => a.name.localeCompare(b.name));
         setAllCircuits(list);
       })
@@ -93,15 +116,28 @@ export default function StatsView({ series }) {
   }, [stats?.season]);
 
   const rounds = stats?.rounds || [];
+  // FIX (post-user-feedback): these used to sort alphabetically by name.
+  // Sorted by each entry's position in the latest cached round's official
+  // standings instead, so the graph's toggle list (and every dropdown that
+  // shares this array) reads in current championship order — leaders
+  // first, matching how every real F1 standings table reads.
   const drivers = useMemo(() => {
     const entries = new Map();
     rounds.forEach((round) => round.drivers?.forEach((driver) => entries.set(driver.driverId, { name: driver.driverName, constructorId: driver.constructorId })));
-    return [...entries.entries()].map(([id, { name, constructorId }]) => ({ id, name, constructorId })).sort((a, b) => a.name.localeCompare(b.name));
+    const latest = rounds[rounds.length - 1];
+    const order = new Map((latest?.driverStandings || []).map((standing) => [standing.id, standing.position]));
+    return [...entries.entries()]
+      .map(([id, { name, constructorId }]) => ({ id, name, constructorId }))
+      .sort((a, b) => (order.get(a.id) ?? 999) - (order.get(b.id) ?? 999));
   }, [rounds]);
   const constructors = useMemo(() => {
     const entries = new Map();
     rounds.forEach((round) => round.drivers?.forEach((driver) => entries.set(driver.constructorId, driver.constructorName)));
-    return [...entries.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+    const latest = rounds[rounds.length - 1];
+    const order = new Map((latest?.constructorStandings || []).map((standing) => [standing.id, standing.position]));
+    return [...entries.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => (order.get(a.id) ?? 999) - (order.get(b.id) ?? 999));
   }, [rounds]);
 
   // FIX (post-user-feedback): this used to key its "default to first 4" line
@@ -179,8 +215,10 @@ export default function StatsView({ series }) {
     <div><h1 className="text-2xl font-black text-white">Performance Stats</h1><p className="text-sm text-gray-500 mt-1">{stats.season} season · through round {stats.lastCachedRound}</p></div>
     {error && <div className="rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">{error}</div>}
 
-    <section className={card}>
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4"><h2 className="font-bold text-white">Points progression</h2><div className="flex gap-2"><button onClick={() => { setChartType('drivers'); setSelectedDrivers(drivers.slice(0, 4).map((driver) => driver.id)); }} className={`px-3 py-1.5 rounded-lg text-sm ${chartType === 'drivers' ? 'bg-red-600 text-white' : 'bg-gray-900 text-gray-400'}`}>Drivers</button><button onClick={() => { setChartType('constructors'); setSelectedDrivers(constructors.slice(0, 4).map((team) => team.id)); }} className={`px-3 py-1.5 rounded-lg text-sm ${chartType === 'constructors' ? 'bg-red-600 text-white' : 'bg-gray-900 text-gray-400'}`}>Constructors</button></div></div>
+    <CollapsibleSection
+      title="Points progression"
+      headerExtra={<div className="flex gap-2"><button onClick={() => { setChartType('drivers'); setSelectedDrivers(drivers.slice(0, 4).map((driver) => driver.id)); }} className={`px-3 py-1.5 rounded-lg text-sm ${chartType === 'drivers' ? 'bg-red-600 text-white' : 'bg-gray-900 text-gray-400'}`}>Drivers</button><button onClick={() => { setChartType('constructors'); setSelectedDrivers(constructors.slice(0, 4).map((team) => team.id)); }} className={`px-3 py-1.5 rounded-lg text-sm ${chartType === 'constructors' ? 'bg-red-600 text-white' : 'bg-gray-900 text-gray-400'}`}>Constructors</button></div>}
+    >
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <button onClick={() => setSelectedDrivers(chartOptions.map((entry) => entry.id))} className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 font-semibold">Select All</button>
         <button onClick={() => setSelectedDrivers([])} className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 font-semibold">Clear</button>
@@ -196,14 +234,28 @@ export default function StatsView({ series }) {
           issue and is harmless either way, but flagging it's unconfirmed on
           an actual device. */}
       <div className="h-72 w-full"><ResponsiveContainer width="100%" height="100%" minWidth={280}><LineChart data={progression}><CartesianGrid stroke="#262626" /><XAxis dataKey="round" stroke="#737373" /><YAxis stroke="#737373" /><Tooltip contentStyle={{ background: '#171717', border: '1px solid #404040' }} /><Legend />{selectedChartEntries.map((entry) => <Line key={entry.id} type="monotone" dataKey={entry.id} name={entry.name} stroke={colorFor(entry)} strokeWidth={2} connectNulls />)}</LineChart></ResponsiveContainer></div>
-    </section>
+    </CollapsibleSection>
 
-    <section className={card}><h2 className="font-bold text-white mb-4">Qualifying vs race</h2><p className="text-xs text-gray-500 mb-3">Positive values indicate positions gained from the grid to the classified race finish.</p><div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-gray-500"><tr><th className="pb-2">Driver</th><th className="pb-2">Total delta</th><th className="pb-2">Avg / classified race</th></tr></thead><tbody>{deltas.map((driver) => <tr key={driver.id} className="border-t border-gray-900"><td className="py-2 text-white">{driver.name}</td><td className={driver.delta >= 0 ? 'text-emerald-400' : 'text-red-400'}>{driver.delta > 0 ? '+' : ''}{driver.delta}</td><td className="text-gray-300">{driver.average > 0 ? '+' : ''}{driver.average.toFixed(1)}</td></tr>)}</tbody></table></div></section>
+    {/* Defaults collapsed — flagged by the user as the one metric on this
+        page that wasn't reading as clearly useful; still available on
+        demand rather than removed outright. */}
+    <CollapsibleSection title="Qualifying vs race" defaultOpen={false}>
+      <p className="text-xs text-gray-500 mb-3">Positive values indicate positions gained from the grid to the classified race finish.</p>
+      <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-gray-500"><tr><th className="pb-2">Driver</th><th className="pb-2">Total delta</th><th className="pb-2">Avg / classified race</th></tr></thead><tbody>{deltas.map((driver) => <tr key={driver.id} className="border-t border-gray-900"><td className="py-2 text-white">{driver.name}</td><td className={driver.delta >= 0 ? 'text-emerald-400' : 'text-red-400'}>{driver.delta > 0 ? '+' : ''}{driver.delta}</td><td className="text-gray-300">{driver.average > 0 ? '+' : ''}{driver.average.toFixed(1)}</td></tr>)}</tbody></table></div>
+    </CollapsibleSection>
 
-    <section className={card}><h2 className="font-bold text-white mb-4">Wins, podiums & DNFs</h2><div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-gray-500"><tr><th className="pb-2">Driver</th><th className="pb-2">Wins</th><th className="pb-2">Podiums</th><th className="pb-2">DNFs</th></tr></thead><tbody>{[...summary].sort((a, b) => b.wins - a.wins || b.podiums - a.podiums).map((driver) => <tr key={driver.id} className="border-t border-gray-900"><td className="py-2 text-white">{driver.name}</td><td>{driver.wins}</td><td>{driver.podiums}</td><td className={driver.dnfs ? 'text-red-400' : 'text-gray-300'}>{driver.dnfs}</td></tr>)}</tbody></table></div></section>
+    <CollapsibleSection title="Wins, podiums & DNFs">
+      <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-gray-500"><tr><th className="pb-2">Driver</th><th className="pb-2">Wins</th><th className="pb-2">Podiums</th><th className="pb-2">DNFs</th></tr></thead><tbody>{[...summary].sort((a, b) => b.wins - a.wins || b.podiums - a.podiums).map((driver) => <tr key={driver.id} className="border-t border-gray-900"><td className="py-2 text-white">{driver.name}</td><td>{driver.wins}</td><td>{driver.podiums}</td><td className={driver.dnfs ? 'text-red-400' : 'text-gray-300'}>{driver.dnfs}</td></tr>)}</tbody></table></div>
+    </CollapsibleSection>
 
-    <section className={card}><h2 className="font-bold text-white mb-4">Head-to-head</h2><div className="flex flex-wrap gap-3 mb-4"><Select value={firstDriver} onChange={setFirstDriver}>{drivers.map((driver) => <option value={driver.id} key={driver.id}>{driver.name}</option>)}</Select><Select value={secondDriver} onChange={setSecondDriver}>{drivers.map((driver) => <option value={driver.id} key={driver.id}>{driver.name}</option>)}</Select></div>{headToHead.length ? <><p className="text-sm text-gray-300 mb-3"><span className="text-white font-bold">{drivers.find((driver) => driver.id === firstDriver)?.name}: {h2hWins.first}</span> · <span className="text-white font-bold">{drivers.find((driver) => driver.id === secondDriver)?.name}: {h2hWins.second}</span> race finishes ahead</p><div className="space-y-2">{headToHead.map((race) => <div key={race.round} className="text-sm flex justify-between border-t border-gray-900 pt-2"><span className="text-gray-400">R{race.round} · {race.raceName}{race.teammates ? ' · teammates' : ''}</span><span className="text-white">{race.first.positionText} — {race.second.positionText}</span></div>)}</div></> : <p className="text-sm text-gray-500">These drivers haven't both raced in a cached round this season.</p>}</section>
+    <CollapsibleSection title="Head-to-head">
+      <div className="flex flex-wrap gap-3 mb-4"><Select value={firstDriver} onChange={setFirstDriver}>{drivers.map((driver) => <option value={driver.id} key={driver.id}>{driver.name}</option>)}</Select><Select value={secondDriver} onChange={setSecondDriver}>{drivers.map((driver) => <option value={driver.id} key={driver.id}>{driver.name}</option>)}</Select></div>
+      {headToHead.length ? <><p className="text-sm text-gray-300 mb-3"><span className="text-white font-bold">{drivers.find((driver) => driver.id === firstDriver)?.name}: {h2hWins.first}</span> · <span className="text-white font-bold">{drivers.find((driver) => driver.id === secondDriver)?.name}: {h2hWins.second}</span> race finishes ahead</p><div className="space-y-2">{headToHead.map((race) => <div key={race.round} className="text-sm flex justify-between border-t border-gray-900 pt-2"><span className="text-gray-400">R{race.round} · {race.raceName}{race.teammates ? ' · teammates' : ''}</span><span className="text-white">{race.first.positionText} — {race.second.positionText}</span></div>)}</div></> : <p className="text-sm text-gray-500">These drivers haven't both raced in a cached round this season.</p>}
+    </CollapsibleSection>
 
-    <section className={card}><h2 className="font-bold text-white mb-4">Track history</h2><div className="flex flex-wrap gap-3"><Select value={historyDriver} onChange={setHistoryDriver}>{drivers.map((driver) => <option value={driver.id} key={driver.id}>{driver.name}</option>)}</Select><Select value={historyCircuit} onChange={setHistoryCircuit} disabled={!allCircuits.length}>{allCircuits.length ? allCircuits.map((circuit) => <option value={circuit.id} key={circuit.id}>{circuit.name}</option>) : <option>Loading circuits…</option>}</Select><button onClick={loadHistory} disabled={historyLoading || !allCircuits.length} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{historyLoading ? 'Loading…' : 'Look up history'}</button></div>{history && <div className="mt-4 text-sm text-gray-300"><p className="mb-2">{history.races.length} starts at this circuit</p><div className="space-y-1">{history.races.map((race) => <div key={`${race.season}-${race.round}`} className="flex justify-between border-t border-gray-900 pt-1"><span>{race.season} · {race.raceName}</span><span>{race.positionText} (grid {race.grid})</span></div>)}</div></div>}</section>
+    <CollapsibleSection title="Track history">
+      <div className="flex flex-wrap gap-3"><Select value={historyDriver} onChange={setHistoryDriver}>{drivers.map((driver) => <option value={driver.id} key={driver.id}>{driver.name}</option>)}</Select><Select value={historyCircuit} onChange={setHistoryCircuit} disabled={!allCircuits.length}>{allCircuits.length ? allCircuits.map((circuit) => <option value={circuit.id} key={circuit.id}>{circuit.name}{circuit.country ? ` (${circuit.country})` : ''}</option>) : <option>Loading circuits…</option>}</Select><button onClick={loadHistory} disabled={historyLoading || !allCircuits.length} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{historyLoading ? 'Loading…' : 'Look up history'}</button></div>
+      {history && <div className="mt-4 text-sm text-gray-300"><p className="mb-2">{history.races.length} starts at this circuit</p><div className="space-y-1">{history.races.map((race) => <div key={`${race.season}-${race.round}`} className="flex justify-between border-t border-gray-900 pt-1"><span>{race.season} · {race.raceName}</span><span>{race.positionText} (grid {race.grid})</span></div>)}</div></div>}
+    </CollapsibleSection>
   </div>;
 }

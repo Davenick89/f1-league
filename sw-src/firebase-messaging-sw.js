@@ -3,6 +3,17 @@ import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching';
 precacheAndRoute(self.__WB_MANIFEST);
 cleanupOutdatedCaches();
 
+// FIX (post-Track-D user report): "Tap to refresh" on the update-available
+// banner (F1League.jsx's registerSW()/updateSW(true)) silently did nothing.
+// vite-plugin-pwa's injectManifest strategy (unlike generateSW) does NOT
+// auto-inject a SKIP_WAITING message handler into the service worker — the
+// client-side updateSW(true) call correctly posts that message to the
+// waiting worker, but with nothing listening for it here, self.skipWaiting()
+// never ran, the new worker never activated, and the page never reloaded.
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
+});
+
 // Firebase Messaging Service Worker. This remains a classic script after
 // injectManifest bundles it, so importScripts continues to work in Firefox.
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js');
