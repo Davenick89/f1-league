@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { collection, doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { Copy } from 'lucide-react';
 import { db, track } from './shared.js';
 
@@ -16,19 +16,27 @@ function AdminWizard({ user, onComplete }) {
     setLoading(true);
     try {
       const groupId = `group_${Date.now()}`;
+      // FIX (post-Track-D audit): currentOpenRound used to be set in this same
+      // write, before raceStatus/round1 existed — a dropped second write left
+      // isRaceOpen() seeing a currentOpenRound with no matching status doc,
+      // which it treats as closed, permanently blocking the new league until
+      // manually repaired. Reordered to match F1League.jsx's own creation
+      // path: currentOpenRound is set last, once raceStatus/round1 is
+      // confirmed to exist. isRaceOpen() treats a *missing* currentOpenRound
+      // as legacy-open, so a failure partway leaves the group permissive
+      // rather than blocked.
       await setDoc(doc(db, "groups", groupId), {
         name: leagueName.trim(),
         admin: user.uid,
         members: [user.uid],
-        currentOpenRound: "round1",
         createdTimestamp: serverTimestamp(),
       });
-      // Seed the first race status so isRaceOpen() works immediately
       await setDoc(doc(db, `groups/${groupId}/raceStatus`, "round1"), {
         status: 'CURRENT',
         isPredictionOpen: true,
         openedAt: new Date().toISOString()
       });
+      await updateDoc(doc(db, "groups", groupId), { currentOpenRound: "round1" });
       const group = { id: groupId, name: leagueName.trim(), admin: user.uid, members: [user.uid] };
       setCreatedGroup(group);
       setStep(3);

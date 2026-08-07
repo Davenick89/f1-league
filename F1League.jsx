@@ -3,12 +3,13 @@ import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import { collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { getToken } from 'firebase/messaging';
+import { registerSW } from 'virtual:pwa-register';
 import { validateNickname, validateGroupName, validateInviteCode } from './validation.js';
 import { LogOut, Plus, Users, Trophy, BarChart3, Settings, Calendar } from 'lucide-react';
 import {
   auth, db, functions, VAPID_KEY, track, fcmSupported, getMessagingInstance,
   F1_SCHEDULE_2026, getCurrentRound, getTimeUntilLock, getValidatedApiSessionStr,
-  syncScheduleWithAPI, useF1ApiSchedule,
+  syncScheduleWithAPI, useF1ApiSchedule, useOnlineStatus,
 } from './shared.js';
 
 const AdminWizard = React.lazy(() => import('./AdminWizard.jsx'));
@@ -50,12 +51,12 @@ function GroupStandingBadge({ groupId, userId }) {
         let found = false;
         scoresSnap.docs.filter(d => d.id !== 'summary').forEach(d => {
           let pts = 0;
-          for (let i = 1; i <= 24; i++) pts += d.data()[`round${i}`]?.totalPoints || 0;
+          for (let i = 1; i <= F1_SCHEDULE_2026.length; i++) pts += d.data()[`round${i}`]?.totalPoints || 0;
           if (d.id === userId) { userPts = pts; found = true; }
         });
         scoresSnap.docs.filter(d => d.id !== 'summary').forEach(d => {
           let pts = 0;
-          for (let i = 1; i <= 24; i++) pts += d.data()[`round${i}`]?.totalPoints || 0;
+          for (let i = 1; i <= F1_SCHEDULE_2026.length; i++) pts += d.data()[`round${i}`]?.totalPoints || 0;
           if (pts > userPts) rank++;
         });
         if (found) setStanding({ rank, pts: userPts });
@@ -146,6 +147,19 @@ export default function F1League() {
   const [showNicknameSetup, setShowNicknameSetup] = useState(false);
   const [googleFirstName, setGoogleFirstName] = useState('');
   const [message, setMessage] = useState("");
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updateServiceWorker, setUpdateServiceWorker] = useState(null);
+  const isOnline = useOnlineStatus();
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const updateSW = registerSW({
+      onNeedRefresh() {
+        setUpdateServiceWorker(() => updateSW);
+        setUpdateAvailable(true);
+      },
+    });
+  }, []);
 
   // Run schedule sync once on mount — diagnostic only (console.error on drift,
   // doesn't feed any user-visible state), so it's deferred off the critical
@@ -212,22 +226,16 @@ export default function F1League() {
           }
         }
 
-        // Legacy direct-join flow: ?join={groupId} — keep for existing links
-        const legacyGroupId = params.get('join');
-        if (legacyGroupId) {
-          const groupRef = doc(db, "groups", legacyGroupId);
-          const groupDoc = await getDoc(groupRef);
-          if (groupDoc.exists()) {
-            const groupData = groupDoc.data();
-            const members = groupData.members || [];
-            if (!members.includes(authUser.uid)) {
-              members.push(authUser.uid);
-              await updateDoc(groupRef, { members });
-            }
-            setSelectedGroup({ id: legacyGroupId, ...groupData, members });
-            window.history.replaceState({}, document.title, window.location.pathname);
-          }
-        }
+        // FIX (post-Track-D audit): the old ?join={groupId} direct-write flow
+        // is removed — firestore.rules' groups match only permits a *member*
+        // to read the group doc (line 143) and only permits a member update
+        // that removes themselves, never a non-admin adding a new uid (line
+        // 179+). For the one case this path existed for — a non-member
+        // opening an old link — both the read and the write were already
+        // silently denied, so it could never actually add anyone. Removed
+        // rather than "fixed," since there's no old-groupId → invite-code
+        // mapping to redirect through; anyone with a stale link needs a
+        // fresh invite from the league admin.
       } else {
         setUser(null);
         setGroups([]);
@@ -746,6 +754,18 @@ export default function F1League() {
     <div className="min-h-screen bg-black text-white">
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap');`}</style>
 
+      {!isOnline && (
+        <div className="sticky top-0 z-[60] bg-yellow-500 px-4 py-2 text-center text-sm font-bold text-black">
+          You're offline — showing last-synced data. Reconnect to submit predictions.
+        </div>
+      )}
+      {updateAvailable && (
+        <div className="sticky top-0 z-[60] flex items-center justify-center gap-3 bg-red-600 px-4 py-2 text-sm font-bold text-white">
+          <span>Update available.</span>
+          <button onClick={() => updateServiceWorker?.(true)} className="rounded bg-white px-3 py-1 text-xs font-black text-red-700">Tap to refresh</button>
+        </div>
+      )}
+
       <nav style={{ background: 'rgba(0,0,0,0.97)', borderBottom: '1px solid rgba(220,0,0,0.3)' }} className="sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -923,7 +943,7 @@ function LandingPage({ handleGoogleSignIn }) {
             </a>
           </div>
           <div className="lp-fade mt-20 grid grid-cols-3 gap-6 max-w-xs mx-auto" style={{ animationDelay: '0.65s' }}>
-            {[['24','RACES'],['22','DRIVERS'],['6','SPRINT WKS']].map(([v,l]) => (
+            {[[String(F1_SCHEDULE_2026.length),'RACES'],['22','DRIVERS'],['6','SPRINT WKS']].map(([v,l]) => (
               <div key={l} className="text-center">
                 <div className="text-2xl font-black" style={{ color: '#DC0000', fontFamily: 'Orbitron' }}>{v}</div>
                 <div className="text-xs text-gray-600 tracking-widest mt-1">{l}</div>

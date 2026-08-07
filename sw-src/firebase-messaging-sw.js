@@ -1,5 +1,10 @@
-// Firebase Messaging Service Worker
-// Env vars are injected by vite.config.js at build time via the inject-sw-env plugin.
+import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching';
+
+precacheAndRoute(self.__WB_MANIFEST);
+cleanupOutdatedCaches();
+
+// Firebase Messaging Service Worker. This remains a classic script after
+// injectManifest bundles it, so importScripts continues to work in Firefox.
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js');
 
@@ -20,8 +25,8 @@ messaging.onBackgroundMessage((payload) => {
   if (!title) return;
   self.registration.showNotification(title, {
     body,
-    icon: '/favicon.ico',
-    badge: '/favicon.ico',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
     data: payload.data ?? {},
     requireInteraction: false,
   });

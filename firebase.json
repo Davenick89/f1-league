@@ -12,6 +12,7 @@
   "hosting": {
     "site": "f1-predictionsleague",
     "public": "dist",
+    "predeploy": ["node scripts/inject-sw-env.js"],
     "ignore": [
       "firebase.json",
       "**/.*",

@@ -82,15 +82,21 @@ service cloud.firestore {
     }
 
     // Bounds the entire key-set first (catches fabricated keys like a fake
-    // "round25" or arbitrary extra fields the per-round loop below would
-    // never inspect, since it only enumerates the 24 real round keys),
+    // "round24" or arbitrary extra fields the per-round loop below would
+    // never inspect, since it only enumerates the 23 real round keys),
     // then verifies every round key other than the current one is
     // byte-identical to its prior value.
+    // FIX (post-Track-D audit): trimmed the allowlist/roundUnchanged calls
+    // down to round23 — the 2026-08-06 schedule rebuild (commit db5ab43) cut
+    // the season from 24 rounds to 23 (Bahrain/Saudi Arabia cancelled), and
+    // this file was the one consumer that never got updated to match, so a
+    // 'round24' key could still be written into a predictions doc (though it
+    // could never score — no round24 raceStatus/results doc can exist).
     function onlyCurrentRoundChanged(before, after, currentRoundKey) {
       return after.keys().hasOnly(['nickname',
         'round1','round2','round3','round4','round5','round6','round7','round8',
         'round9','round10','round11','round12','round13','round14','round15','round16',
-        'round17','round18','round19','round20','round21','round22','round23','round24'])
+        'round17','round18','round19','round20','round21','round22','round23'])
         && roundUnchanged(before, after, 'round1'  == currentRoundKey ? '__skip__' : 'round1')
         && roundUnchanged(before, after, 'round2'  == currentRoundKey ? '__skip__' : 'round2')
         && roundUnchanged(before, after, 'round3'  == currentRoundKey ? '__skip__' : 'round3')
@@ -113,8 +119,7 @@ service cloud.firestore {
         && roundUnchanged(before, after, 'round20' == currentRoundKey ? '__skip__' : 'round20')
         && roundUnchanged(before, after, 'round21' == currentRoundKey ? '__skip__' : 'round21')
         && roundUnchanged(before, after, 'round22' == currentRoundKey ? '__skip__' : 'round22')
-        && roundUnchanged(before, after, 'round23' == currentRoundKey ? '__skip__' : 'round23')
-        && roundUnchanged(before, after, 'round24' == currentRoundKey ? '__skip__' : 'round24');
+        && roundUnchanged(before, after, 'round23' == currentRoundKey ? '__skip__' : 'round23');
     }
 
     // ─── Users ───────────────────────────────────────────────────────────────

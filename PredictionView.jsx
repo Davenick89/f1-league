@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, doc, getDoc, setDoc, onSnapshot, serverTimestamp, Timestamp, writeBatch } from 'firebase/firestore';
 import { Edit, Info, Lock, X } from 'lucide-react';
-import { db, functions, F1_DRIVERS, formatLockTimeIST, getDisplayName, getPredictionLockTime, getPredictionOpenTime, getValidatedApiSessionStr, track, useF1ApiSchedule } from './shared.js';
+import { db, functions, F1_DRIVERS, formatLockTimeIST, getDisplayName, getPredictionLockTime, getPredictionOpenTime, getValidatedApiSessionStr, track, useF1ApiSchedule, useOnlineStatus, waitForServerAck } from './shared.js';
 import { rfDistance, rfPoints, scoreRace } from './scoring.js';
 import { validatePredictions } from './validation.js';
 
@@ -168,6 +168,8 @@ function InfoBtn({ fieldKey, onOpen }) {
 
 // PREDICTION VIEW - COMPLETE REBUILD
 function PredictionView({ group, race, currentRound, countdown, user }) {
+  const isOnline = useOnlineStatus();
+  const isOffline = !isOnline;
   const { apiData } = useF1ApiSchedule(2026);
   const [predictions, setPredictions] = useState({
     pole: "",
@@ -183,6 +185,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
   const [randomNumber, setRandomNumber] = useState(null);
   const [randomGeneratedBy, setRandomGeneratedBy] = useState(null);
   const [message, setMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [helpField, setHelpField] = useState(null);
   const [userHasPredictions, setUserHasPredictions] = useState(false);
@@ -421,6 +424,10 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
   };
 
   const handleSavePredictions = async () => {
+    if (isOffline) {
+      setMessage('Reconnect to submit predictions');
+      return;
+    }
     try {
       const validation = validatePredictions(predictions, !!race?.isSprint);
       if (!validation.valid) {
@@ -440,6 +447,8 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
       const userNickname = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.googleFirstName, userDoc.data()?.email);
 
       const predRef = doc(db, `groups/${group.id}/predictions`, user.uid);
+      setIsSaving(true);
+      setMessage("⏳ Saving...");
       await setDoc(predRef, {
         nickname: userNickname,
         [`round${currentRound}`]: {
@@ -448,6 +457,16 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
           createdAt: serverTimestamp()
         }
       }, { merge: true });
+
+      // FIX (post-Track-D audit): setDoc() above resolves as soon as the
+      // write is durably queued to persistentLocalCache(), not once the
+      // server has it — on a device that's "online" per navigator.onLine but
+      // whose Firestore connection is actually dead (captive portal,
+      // degraded uplink), that meant this code declared success for a write
+      // that could still be silently rejected later by firestore.rules if it
+      // doesn't sync until after the round locks. Wait for server
+      // confirmation (or a timeout) before telling the player it's saved.
+      const confirmed = await waitForServerAck(predRef);
 
       // Audit trail — distinguish first submission from subsequent edits
       const raceName = race?.name || `Round ${currentRound}`;
@@ -470,10 +489,17 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
       });
       setUserHasPredictions(true);
       setIsEditing(false);
-      setMessage("✅ Predictions saved!");
-      setTimeout(() => setMessage(""), 3000);
+      setIsSaving(false);
+      if (confirmed) {
+        setMessage("✅ Predictions saved!");
+        setTimeout(() => setMessage(""), 3000);
+      } else {
+        setMessage("⚠️ Saved on this device, but couldn't confirm with the server — check your connection. It will sync once you're back online, but won't count if the round locks first.");
+        setTimeout(() => setMessage(""), 8000);
+      }
     } catch (error) {
       console.error("Error:", error);
+      setIsSaving(false);
       setMessage("❌ Error saving");
     }
   };
@@ -776,11 +802,12 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
             </div>
             <button
               onClick={handleSavePredictions}
-              disabled={isNotYetOpen}
+              disabled={isNotYetOpen || isOffline || isSaving}
               className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg transition-colors"
             >
-              {isNotYetOpen ? '🗓️ Opens Monday' : 'SAVE PREDICTIONS'}
+              {isNotYetOpen ? '🗓️ Opens Monday' : isOffline ? 'RECONNECT TO SUBMIT PREDICTIONS' : isSaving ? 'SAVING...' : 'SAVE PREDICTIONS'}
             </button>
+            {isOffline && <p className="text-center text-sm mt-3 text-yellow-400">Reconnect to submit predictions</p>}
           </>
         ) : null}
 

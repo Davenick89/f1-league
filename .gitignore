@@ -34,3 +34,9 @@ service-account.json
 
 # Logs
 functions/firebase-debug.log
+
+# Playwright MCP debug artifacts
+.playwright-mcp/
+
+# Firestore backups (contain real user data — never commit)
+security/backups/

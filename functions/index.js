@@ -32,34 +32,38 @@ function buildUnsubscribeUrl(uid, key) {
   return `https://us-central1-f1-predictions-league.cloudfunctions.net/unsubscribeEmail?uid=${uid}&ts=${ts}&sig=${sig}`;
 }
 
-// ─── Schedule (mirrors F1League.jsx F1_SCHEDULE_2026 — session fields must
+// ─── Schedule (mirrors shared.js's F1_SCHEDULE_2026 — session fields must
 // stay byte-identical between the two copies; qualStart/sprintQualStart and
 // date are load-bearing for lock-time math below, not just display) ───────────
+// Rebuilt (session 2026-08-06) to match the real, current 2026 calendar —
+// see shared.js's copy for the full explanation (Bahrain/Saudi Arabia
+// cancelled, Malaysia added as a relocated "Bahrain GP" in October, 23
+// rounds not 24). Any consumer of this array's length must derive from
+// F1_SCHEDULE_2026.length, not a hardcoded round count.
 const F1_SCHEDULE_2026 = [
-  { round: 1,  name: "Australia",           date: "2026-03-08", fp1: "2026-03-06T09:30:00Z", fp2: "2026-03-06T13:00:00Z", qualStart: "2026-03-07T06:00:00Z", raceStart: "2026-03-08T04:00:00Z", isSprint: false },
-  { round: 2,  name: "China",               date: "2026-03-15", fp1: "2026-03-13T10:00:00Z", sprintQualStart: "2026-03-13T13:30:00Z",                        raceStart: "2026-03-15T07:00:00Z", isSprint: true  },
-  { round: 3,  name: "Japan",               date: "2026-03-29", fp1: "2026-03-27T10:00:00Z", fp2: "2026-03-27T13:30:00Z", qualStart: "2026-03-28T07:00:00Z", raceStart: "2026-03-29T05:00:00Z", isSprint: false },
-  { round: 4,  name: "Bahrain",             date: "2026-04-12", fp1: "2026-04-10T14:00:00Z", fp2: "2026-04-10T17:30:00Z", qualStart: "2026-04-11T15:00:00Z", raceStart: "2026-04-12T15:00:00Z", isSprint: false },
-  { round: 5,  name: "Saudi Arabia",        date: "2026-04-19", fp1: "2026-04-17T17:00:00Z", fp2: "2026-04-17T20:30:00Z", qualStart: "2026-04-18T17:00:00Z", raceStart: "2026-04-19T17:00:00Z", isSprint: false },
-  { round: 6,  name: "Miami",               date: "2026-05-03", fp1: "2026-05-01T13:00:00Z", sprintQualStart: "2026-05-01T17:00:00Z",                        raceStart: "2026-05-03T19:30:00Z", isSprint: true  },
-  { round: 7,  name: "Canada",              date: "2026-05-24", fp1: "2026-05-22T14:00:00Z", sprintQualStart: "2026-05-22T18:00:00Z",                        raceStart: "2026-05-24T18:00:00Z", isSprint: true  },
-  { round: 8,  name: "Monaco",              date: "2026-06-07", fp1: "2026-06-05T14:00:00Z", fp2: "2026-06-05T17:30:00Z", qualStart: "2026-06-06T13:00:00Z", raceStart: "2026-06-07T13:00:00Z", isSprint: false },
-  { round: 9,  name: "Barcelona-Catalunya", date: "2026-06-14", fp1: "2026-06-12T13:00:00Z", fp2: "2026-06-12T16:30:00Z", qualStart: "2026-06-13T13:00:00Z", raceStart: "2026-06-14T13:00:00Z", isSprint: false },
-  { round: 10, name: "Austria",             date: "2026-06-28", fp1: "2026-06-26T14:00:00Z", fp2: "2026-06-26T17:30:00Z", qualStart: "2026-06-27T13:00:00Z", raceStart: "2026-06-28T13:00:00Z", isSprint: false },
-  { round: 11, name: "Great Britain",       date: "2026-07-05", fp1: "2026-07-03T13:00:00Z", sprintQualStart: "2026-07-03T17:00:00Z",                        raceStart: "2026-07-05T14:00:00Z", isSprint: true  },
-  { round: 12, name: "Belgium",             date: "2026-07-19", fp1: "2026-07-17T14:00:00Z", fp2: "2026-07-17T17:30:00Z", qualStart: "2026-07-18T13:00:00Z", raceStart: "2026-07-19T13:00:00Z", isSprint: false },
-  { round: 13, name: "Hungary",             date: "2026-07-26", fp1: "2026-07-24T14:00:00Z", fp2: "2026-07-24T17:30:00Z", qualStart: "2026-07-25T13:00:00Z", raceStart: "2026-07-26T13:00:00Z", isSprint: false },
-  { round: 14, name: "Netherlands",         date: "2026-08-23", fp1: "2026-08-21T14:00:00Z", sprintQualStart: "2026-08-21T18:00:00Z",                        raceStart: "2026-08-23T13:00:00Z", isSprint: true  },
-  { round: 15, name: "Italy",               date: "2026-09-06", fp1: "2026-09-04T13:00:00Z", fp2: "2026-09-04T16:30:00Z", qualStart: "2026-09-05T13:00:00Z", raceStart: "2026-09-06T13:00:00Z", isSprint: false },
-  { round: 16, name: "Spain",               date: "2026-09-13", fp1: "2026-09-11T14:00:00Z", fp2: "2026-09-11T17:30:00Z", qualStart: "2026-09-12T13:00:00Z", raceStart: "2026-09-13T13:00:00Z", isSprint: false },
-  { round: 17, name: "Azerbaijan",          date: "2026-09-27", fp1: "2026-09-25T12:00:00Z", fp2: "2026-09-25T15:30:00Z", qualStart: "2026-09-26T11:00:00Z", raceStart: "2026-09-27T11:00:00Z", isSprint: false },
-  { round: 18, name: "Singapore",           date: "2026-10-11", fp1: "2026-10-09T14:00:00Z", sprintQualStart: "2026-10-09T18:00:00Z",                        raceStart: "2026-10-11T12:00:00Z", isSprint: true  },
-  { round: 19, name: "United States",       date: "2026-10-25", fp1: "2026-10-23T12:00:00Z", fp2: "2026-10-23T15:30:00Z", qualStart: "2026-10-24T19:00:00Z", raceStart: "2026-10-25T19:00:00Z", isSprint: false },
-  { round: 20, name: "Mexico",              date: "2026-11-01", fp1: "2026-10-30T18:00:00Z", fp2: "2026-10-30T21:30:00Z", qualStart: "2026-10-31T20:00:00Z", raceStart: "2026-11-01T20:00:00Z", isSprint: false },
-  { round: 21, name: "Brazil",              date: "2026-11-08", fp1: "2026-11-06T11:00:00Z", fp2: "2026-11-06T14:30:00Z", qualStart: "2026-11-07T17:00:00Z", raceStart: "2026-11-08T17:00:00Z", isSprint: false },
-  { round: 22, name: "Las Vegas",           date: "2026-11-21", fp1: "2026-11-19T22:00:00Z", fp2: "2026-11-20T01:30:00Z", qualStart: "2026-11-21T06:00:00Z", raceStart: "2026-11-22T06:00:00Z", isSprint: false },
-  { round: 23, name: "Qatar",               date: "2026-11-29", fp1: "2026-11-27T15:00:00Z", fp2: "2026-11-27T18:30:00Z", qualStart: "2026-11-28T14:00:00Z", raceStart: "2026-11-29T16:00:00Z", isSprint: false },
-  { round: 24, name: "Abu Dhabi",           date: "2026-12-06", fp1: "2026-12-04T08:00:00Z", fp2: "2026-12-04T11:30:00Z", qualStart: "2026-12-05T13:00:00Z", raceStart: "2026-12-06T13:00:00Z", isSprint: false },
+  { round: 1,  name: "Australia",           date: "2026-03-08", fp1: "2026-03-06T01:30:00Z", fp2: "2026-03-06T05:00:00Z", qualStart: "2026-03-07T05:00:00Z", raceStart: "2026-03-08T04:00:00Z", isSprint: false },
+  { round: 2,  name: "China",               date: "2026-03-15", fp1: "2026-03-13T03:30:00Z", sprintQualStart: "2026-03-13T07:30:00Z",                        qualStart: "2026-03-14T07:00:00Z", raceStart: "2026-03-15T07:00:00Z", isSprint: true  },
+  { round: 3,  name: "Japan",               date: "2026-03-29", fp1: "2026-03-27T02:30:00Z", fp2: "2026-03-27T06:00:00Z", qualStart: "2026-03-28T06:00:00Z", raceStart: "2026-03-29T05:00:00Z", isSprint: false },
+  { round: 4,  name: "Miami",               date: "2026-05-03", fp1: "2026-05-01T16:00:00Z", sprintQualStart: "2026-05-01T20:30:00Z",                        qualStart: "2026-05-02T20:00:00Z", raceStart: "2026-05-03T20:00:00Z", isSprint: true  },
+  { round: 5,  name: "Canada",              date: "2026-05-24", fp1: "2026-05-22T16:30:00Z", sprintQualStart: "2026-05-22T20:30:00Z",                        qualStart: "2026-05-23T20:00:00Z", raceStart: "2026-05-24T20:00:00Z", isSprint: true  },
+  { round: 6,  name: "Monaco",              date: "2026-06-07", fp1: "2026-06-05T11:30:00Z", fp2: "2026-06-05T15:00:00Z", qualStart: "2026-06-06T14:00:00Z", raceStart: "2026-06-07T13:00:00Z", isSprint: false },
+  { round: 7,  name: "Barcelona-Catalunya", date: "2026-06-14", fp1: "2026-06-12T11:30:00Z", fp2: "2026-06-12T15:00:00Z", qualStart: "2026-06-13T14:00:00Z", raceStart: "2026-06-14T13:00:00Z", isSprint: false },
+  { round: 8,  name: "Austria",             date: "2026-06-28", fp1: "2026-06-26T11:30:00Z", fp2: "2026-06-26T15:00:00Z", qualStart: "2026-06-27T14:00:00Z", raceStart: "2026-06-28T13:00:00Z", isSprint: false },
+  { round: 9,  name: "Great Britain",       date: "2026-07-05", fp1: "2026-07-03T11:30:00Z", sprintQualStart: "2026-07-03T15:30:00Z",                        qualStart: "2026-07-04T15:00:00Z", raceStart: "2026-07-05T14:00:00Z", isSprint: true  },
+  { round: 10, name: "Belgium",             date: "2026-07-19", fp1: "2026-07-17T11:30:00Z", fp2: "2026-07-17T15:00:00Z", qualStart: "2026-07-18T14:00:00Z", raceStart: "2026-07-19T13:00:00Z", isSprint: false },
+  { round: 11, name: "Hungary",             date: "2026-07-26", fp1: "2026-07-24T11:30:00Z", fp2: "2026-07-24T15:00:00Z", qualStart: "2026-07-25T14:00:00Z", raceStart: "2026-07-26T13:00:00Z", isSprint: false },
+  { round: 12, name: "Netherlands",         date: "2026-08-23", fp1: "2026-08-21T10:30:00Z", sprintQualStart: "2026-08-21T14:30:00Z",                        qualStart: "2026-08-22T14:00:00Z", raceStart: "2026-08-23T13:00:00Z", isSprint: true  },
+  { round: 13, name: "Italy",               date: "2026-09-06", fp1: "2026-09-04T10:30:00Z", fp2: "2026-09-04T14:00:00Z", qualStart: "2026-09-05T14:00:00Z", raceStart: "2026-09-06T13:00:00Z", isSprint: false },
+  { round: 14, name: "Spain",               date: "2026-09-13", fp1: "2026-09-11T11:30:00Z", fp2: "2026-09-11T15:00:00Z", qualStart: "2026-09-12T14:00:00Z", raceStart: "2026-09-13T13:00:00Z", isSprint: false },
+  { round: 15, name: "Azerbaijan",          date: "2026-09-26", fp1: "2026-09-24T08:30:00Z", fp2: "2026-09-24T12:00:00Z", qualStart: "2026-09-25T12:00:00Z", raceStart: "2026-09-26T11:00:00Z", isSprint: false },
+  { round: 16, name: "Bahrain (Malaysia)",  date: "2026-10-04", fp1: "2026-10-02T02:00:00Z", fp2: "2026-10-02T06:00:00Z", qualStart: "2026-10-03T09:00:00Z", raceStart: "2026-10-04T07:00:00Z", isSprint: false },
+  { round: 17, name: "Singapore",           date: "2026-10-11", fp1: "2026-10-09T08:30:00Z", sprintQualStart: "2026-10-09T12:30:00Z",                        qualStart: "2026-10-10T13:00:00Z", raceStart: "2026-10-11T12:00:00Z", isSprint: true  },
+  { round: 18, name: "United States",       date: "2026-10-25", fp1: "2026-10-23T17:30:00Z", fp2: "2026-10-23T21:00:00Z", qualStart: "2026-10-24T21:00:00Z", raceStart: "2026-10-25T20:00:00Z", isSprint: false },
+  { round: 19, name: "Mexico",              date: "2026-11-01", fp1: "2026-10-30T18:30:00Z", fp2: "2026-10-30T22:00:00Z", qualStart: "2026-10-31T21:00:00Z", raceStart: "2026-11-01T20:00:00Z", isSprint: false },
+  { round: 20, name: "Brazil",              date: "2026-11-08", fp1: "2026-11-06T15:30:00Z", fp2: "2026-11-06T19:00:00Z", qualStart: "2026-11-07T18:00:00Z", raceStart: "2026-11-08T17:00:00Z", isSprint: false },
+  { round: 21, name: "Las Vegas",           date: "2026-11-22", fp1: "2026-11-20T00:30:00Z", fp2: "2026-11-20T04:00:00Z", qualStart: "2026-11-21T04:00:00Z", raceStart: "2026-11-22T04:00:00Z", isSprint: false },
+  { round: 22, name: "Qatar",               date: "2026-11-29", fp1: "2026-11-27T13:30:00Z", fp2: "2026-11-27T17:00:00Z", qualStart: "2026-11-28T18:00:00Z", raceStart: "2026-11-29T16:00:00Z", isSprint: false },
+  { round: 23, name: "Abu Dhabi",           date: "2026-12-06", fp1: "2026-12-04T09:30:00Z", fp2: "2026-12-04T13:00:00Z", qualStart: "2026-12-05T14:00:00Z", raceStart: "2026-12-06T13:00:00Z", isSprint: false },
 ];
 
 // FIX (post-incident, 2026-07-24): was locking 30 min before FP2 (Friday),
@@ -87,7 +91,18 @@ function getPredictionLockTime(race, offsetMins = 60, apiSessionStr = null) {
 // On total fetch failure the existing cache doc is left untouched, so an
 // outage degrades to today's hardcoded-only behavior, never worse.
 const SCHEDULE_CACHE_DOC = "system/scheduleCache";
-const SCHEDULE_SANITY_MS = 10 * 24 * 60 * 60 * 1000;
+// Tightened from 10 days to 3 (session 2026-08-06, VPS verification pass):
+// a live check against api.openf1.org turned up a bogus duplicate meeting
+// (a second "Bahrain Grand Prix" entry carrying Kuala Lumpur circuit data,
+// round-ordered between Azerbaijan and Singapore) that shifts every later
+// round's inferred number by +1. At a 10-day window this silently passed
+// validation for 5 of those shifted rounds — the season's back half has
+// several races only ~7 days apart, well inside a 10-day tolerance. The
+// season's tightest real gap between two *different* rounds' qualifying
+// times is 7 days; the largest legitimate same-round correction seen
+// (Azerbaijan, hardcoded vs. live) was ~1 day. 3 days keeps a safe margin
+// on both sides without reopening the same false-accept gap.
+const SCHEDULE_SANITY_MS = 3 * 24 * 60 * 60 * 1000;
 
 function toIsoDateTime(obj) {
   return obj?.date && obj?.time ? `${obj.date}T${obj.time}` : null;
@@ -127,28 +142,44 @@ async function fetchJolpicaSchedule() {
 }
 
 // Backup source — api.openf1.org, free/no-auth — used only when Jolpica is
-// unreachable. UNVERIFIED AGAINST A LIVE RESPONSE: this dev sandbox's
-// network policy blocks arbitrary third-party hosts (confirmed for both
-// api.jolpi.ca and api.openf1.org), so this is built from OpenF1's
-// documented, stable /v1/sessions schema, not a live payload. It only ever
-// runs as a fallback and every value it returns still passes through
-// validateApiSessionStr above, so a schema drift here degrades to "no
-// override" rather than a wrong lock time — but confirm the shape against
-// a real response (e.g. from the VPS, which has normal network access)
-// before leaning on it.
+// unreachable. VERIFIED AGAINST A LIVE RESPONSE (VPS session, 2026-08-06):
+// confirmed field names (session_name, date_start, meeting_key, is_cancelled)
+// match, and found two distinct sources of round-inference drift in the
+// live data: (1) /v1/sessions includes pre-season testing meetings ahead of
+// round 1, and (2) it still lists the meetings for the cancelled Bahrain/
+// Saudi Arabia races (all their sessions carry is_cancelled: true) as if
+// they were normal upcoming rounds. Left unfiltered, either one shifts
+// every later round's inferred number and made the fallback silently
+// non-functional for the whole season (every value here still passes
+// through validateApiSessionStr above regardless, so neither was ever a
+// corruption risk — a bad guess just produces no override). Fixed by
+// cross-referencing /v1/meetings to drop testing weekends by name, and
+// dropping any meeting whose sessions are all cancelled.
 //
 // OpenF1 doesn't expose an F1-championship round number directly — round
-// is inferred by ordering meetings by their earliest session date, which
-// is the app's best guess, not a value the API guarantees.
+// is inferred by ordering the remaining (non-testing, non-cancelled)
+// meetings by their earliest session date, which is the app's best guess,
+// not a value the API guarantees. validateApiSessionStr is what makes a
+// wrong guess safe.
 async function fetchOpenF1Schedule() {
-  const res = await fetch(`${OPENF1_BASE_URL}/v1/sessions?year=2026`);
-  if (!res.ok) throw new Error(`OpenF1 HTTP ${res.status}`);
-  const sessions = await res.json();
+  const [sessionsRes, meetingsRes] = await Promise.all([
+    fetch(`${OPENF1_BASE_URL}/v1/sessions?year=2026`),
+    fetch(`${OPENF1_BASE_URL}/v1/meetings?year=2026`),
+  ]);
+  if (!sessionsRes.ok) throw new Error(`OpenF1 HTTP ${sessionsRes.status} (sessions)`);
+  if (!meetingsRes.ok) throw new Error(`OpenF1 HTTP ${meetingsRes.status} (meetings)`);
+  const sessions = await sessionsRes.json();
+  const meetings = await meetingsRes.json();
   if (!Array.isArray(sessions) || !sessions.length) throw new Error("OpenF1 returned no sessions");
+  if (!Array.isArray(meetings) || !meetings.length) throw new Error("OpenF1 returned no meetings");
+
+  const testingMeetingKeys = new Set(
+    meetings.filter((m) => (m.meeting_name || "").toLowerCase().includes("testing")).map((m) => m.meeting_key)
+  );
 
   const earliestByMeeting = new Map();
   sessions.forEach((s) => {
-    if (!s.meeting_key || !s.date_start) return;
+    if (!s.meeting_key || !s.date_start || s.is_cancelled || testingMeetingKeys.has(s.meeting_key)) return;
     const existing = earliestByMeeting.get(s.meeting_key);
     if (!existing || s.date_start < existing) earliestByMeeting.set(s.meeting_key, s.date_start);
   });
@@ -382,7 +413,7 @@ function buildEmailHtml({ raceName, raceRound, minsUntilLock, lockTime, isSprint
 
 // ─── Send email with up to 3 retries ──────────────────────────────────────────
 async function sendReminderEmail({ transporter, to, race, minsUntilLock, lockTime, predictions, leagueName, totalPoints, leagueRank, unsubscribeUrl }) {
-  const sessionLabel = race.isSprint ? "Sprint Qualifying" : "FP2";
+  const sessionLabel = race.isSprint ? "Sprint Qualifying" : "Qualifying";
   const html = buildEmailHtml({
     raceName: race.name,
     raceRound: race.round,
@@ -454,7 +485,7 @@ exports.sendPredictionReminders = onSchedule(
       const lockTime = getPredictionLockTime(race, 60, overrideSessionStr(race, scheduleOverrides));
       const minsUntilLock = Math.floor((lockTime.getTime() - now) / 60000);
       const roundKey = `round${race.round}`;
-      const sessionLabel = race.isSprint ? "Sprint Qualifying" : "FP2";
+      const sessionLabel = race.isSprint ? "Sprint Qualifying" : "Qualifying";
 
       for (const [uid, userData] of userMap) {
         const reminderMins = userData.notificationSettings?.reminderMinutesBefore ?? 30;
@@ -464,25 +495,33 @@ exports.sendPredictionReminders = onSchedule(
         // Only fire during the 5-minute window before the user's chosen reminder time
         if (minsUntilLock > reminderMins || minsUntilLock < reminderMins - 5) continue;
 
-        // Load groups and predictions for this user (shared for both push + email)
+        // Load groups and predictions for this user (shared for both push + email).
+        // FIX (post-Track-D audit): used to `break` after the first group, so a
+        // player in 2+ leagues could have their reminder silently suppressed by
+        // an unrelated already-complete league (or shown that league's stats
+        // while a *different* league was actually the one still open). Now
+        // checks every membership and only treats the round as done once every
+        // group is — the reminder content uses the first still-incomplete group.
         const groupsSnap = await db.collection("groups").where("members", "array-contains", uid).get();
-        let hasPredictions = false;
+        let hasPredictions = groupsSnap.docs.length > 0;
         let predictions = null;
         let leagueName = "F1 Karvaan";
         let totalPoints = 0;
         let leagueRank = null;
+        let pickedIncompleteGroup = false;
 
         for (const groupDoc of groupsSnap.docs) {
           const predDoc = await db.collection(`groups/${groupDoc.id}/predictions`).doc(uid).get();
           const roundPred = predDoc.exists ? predDoc.data()?.[roundKey] : null;
-          if (roundPred?.pole) {
-            hasPredictions = true;
-            predictions = roundPred;
-          } else {
-            predictions = roundPred || {};
-          }
+          const groupComplete = !!roundPred?.pole;
+          if (!groupComplete) hasPredictions = false;
 
-          // Grab league name, total season points, and rank for email
+          // Use the first still-incomplete group for the reminder's content —
+          // once we've picked one, stop overwriting it with a later group's data.
+          if (pickedIncompleteGroup) continue;
+          if (!groupComplete) pickedIncompleteGroup = true;
+
+          predictions = roundPred || {};
           leagueName = groupDoc.data().name || leagueName;
           const scoresSnap = await db.collection(`groups/${groupDoc.id}/scores`).get();
           const allTotals = scoresSnap.docs.map(d => ({
@@ -492,7 +531,6 @@ exports.sendPredictionReminders = onSchedule(
           const myEntry = allTotals.find(e => e.uid === uid);
           totalPoints = myEntry?.pts ?? 0;
           leagueRank = allTotals.findIndex(e => e.uid === uid) + 1 || null;
-          break; // use first group
         }
 
         if (hasPredictions) continue;
@@ -569,6 +607,15 @@ exports.sendPredictionReminders = onSchedule(
 // Runs every 5 minutes. For each group, if the current open round's lock time
 // has passed and predictions are still open, closes them. Idempotent — skips
 // groups where isPredictionOpen is already false.
+//
+// FIX (post-Track-D audit): this used to lock the instant the *original*
+// lock time was in the past, with no awareness of an admin's active
+// overrideExpiresAt window (PredictionView.jsx's handleUnlockPredictions).
+// Since an admin can only unlock a round *after* its lock time has already
+// passed, that meant the very next 5-minute tick — not 15 minutes later —
+// killed the override. Now mirrors the frontend's own auto-lock condition
+// (PredictionView.jsx's countdown effect): only force-lock once there's no
+// override in flight, or once one has actually expired.
 
 exports.autoLockRound = onSchedule({ schedule: "every 5 minutes" }, async () => {
   const db = getFirestore();
@@ -596,6 +643,12 @@ exports.autoLockRound = onSchedule({ schedule: "every 5 minutes" }, async () => 
 
     // Already locked — nothing to do
     if (!statusSnap.exists || statusSnap.data().isPredictionOpen !== true) continue;
+
+    // An admin override window is active and hasn't expired yet — respect it.
+    // The client's own countdown (or this same function, next tick, once
+    // overrideExpiresAt has passed) is responsible for locking it.
+    const overrideExpiresAt = statusSnap.data().overrideExpiresAt;
+    if (overrideExpiresAt && overrideExpiresAt.toMillis() > now) continue;
 
     await statusRef.set({ isPredictionOpen: false, lockedAt: new Date().toISOString() }, { merge: true });
     console.log(`[autoLockRound] Locked ${currentOpenRound} for group ${groupDoc.id}`);
@@ -762,30 +815,40 @@ exports.acceptInvite = onCall({ invoker: "public" }, async (request) => {
 
   const db = getFirestore();
   const inviteRef = db.collection("invites").doc(normalizedCode);
-  const inviteSnap = await inviteRef.get();
-  if (!inviteSnap.exists) {
-    throw new HttpsError("not-found", "This invite link is no longer valid.");
-  }
-  const invite = inviteSnap.data();
 
-  const groupRef = db.collection("groups").doc(invite.leagueId);
-  const groupSnap = await groupRef.get();
-  if (!groupSnap.exists) {
-    throw new HttpsError("not-found", "This league no longer exists.");
-  }
-  const group = groupSnap.data();
-  const alreadyMember = (group.members || []).includes(uid);
+  // FIX (post-Track-D audit): the member check and the usedCount increment
+  // used to be a plain read followed by a separate batch write — two
+  // concurrent redemptions by the same user (double-click, two tabs) could
+  // both read alreadyMember === false before either write landed, so both
+  // would increment usedCount even though arrayUnion left only one member.
+  // A transaction makes the read-then-write atomic so a race collapses into
+  // the same no-op-if-already-a-member behavior as a single request.
+  const { leagueId, leagueName, group, alreadyMember } = await db.runTransaction(async (tx) => {
+    const inviteSnap = await tx.get(inviteRef);
+    if (!inviteSnap.exists) {
+      throw new HttpsError("not-found", "This invite link is no longer valid.");
+    }
+    const invite = inviteSnap.data();
 
-  if (!alreadyMember) {
-    const batch = db.batch();
-    batch.update(groupRef, { members: FieldValue.arrayUnion(uid) });
-    batch.update(inviteRef, { usedCount: FieldValue.increment(1) });
-    await batch.commit();
-  }
+    const groupRef = db.collection("groups").doc(invite.leagueId);
+    const groupSnap = await tx.get(groupRef);
+    if (!groupSnap.exists) {
+      throw new HttpsError("not-found", "This league no longer exists.");
+    }
+    const group = groupSnap.data();
+    const alreadyMember = (group.members || []).includes(uid);
+
+    if (!alreadyMember) {
+      tx.update(groupRef, { members: FieldValue.arrayUnion(uid) });
+      tx.update(inviteRef, { usedCount: FieldValue.increment(1) });
+    }
+
+    return { leagueId: invite.leagueId, leagueName: invite.leagueName, group, alreadyMember };
+  });
 
   return {
-    leagueId: invite.leagueId,
-    leagueName: invite.leagueName || group.name || "F1 League",
+    leagueId,
+    leagueName: leagueName || group.name || "F1 League",
     alreadyMember,
   };
 });
