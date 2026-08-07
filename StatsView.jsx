@@ -101,8 +101,13 @@ export default function StatsView({ series }) {
   useEffect(() => {
     if (!stats?.season) return;
     let cancelled = false;
+    // FIX (post-Stats-v1 audit, round 3): didn't check res.ok before
+    // parsing — a non-2xx (e.g. a 429 from Jolpica) with a JSON error body
+    // parsed "successfully" into a shape with no Races array, silently
+    // degrading to an empty circuit list (permanently stuck on "Loading
+    // circuits…") instead of surfacing as the fetch failure it actually is.
     fetch(`https://api.jolpi.ca/ergast/f1/${stats.season}.json?limit=100`)
-      .then((res) => res.json())
+      .then((res) => { if (!res.ok) throw new Error(`Jolpica HTTP ${res.status}`); return res.json(); })
       .then((data) => {
         if (cancelled) return;
         const races = data?.MRData?.RaceTable?.Races || [];
@@ -110,6 +115,10 @@ export default function StatsView({ series }) {
           .map(([id, { name, country }]) => ({ id, name, country }))
           .sort((a, b) => a.name.localeCompare(b.name));
         setAllCircuits(list);
+        // FIX: this effect only ever set `error`, never cleared it on a
+        // later successful retry — asymmetric with the sibling driverStats
+        // listener, which clears error on every successful snapshot.
+        setError('');
       })
       .catch(() => { if (!cancelled) setError((prev) => prev || 'Could not load the circuit list.'); });
     return () => { cancelled = true; };
@@ -196,6 +205,13 @@ export default function StatsView({ series }) {
     if (race.second.position && !race.first.position) return { ...totals, second: totals.second + 1 };
     return totals;
   }, { first: 0, second: 0 });
+
+  // FIX (post-Stats-v1 audit, round 3): `history` used to only ever be set
+  // inside loadHistory(), never cleared when the driver/circuit selection
+  // changed — changing either dropdown without re-clicking "Look up
+  // history" left the *previous* pair's results on screen, visually
+  // attributed to whichever driver/circuit happened to be selected now.
+  useEffect(() => setHistory(null), [historyDriver, historyCircuit]);
 
   const loadHistory = async () => {
     if (!historyDriver || !historyCircuit) return;

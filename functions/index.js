@@ -361,7 +361,25 @@ exports.refreshDriverStatsCache = onSchedule({ schedule: "every 60 minutes" }, a
       const normalized = normalizeRound(results, drivers, constructors);
       // A scheduled race can be present before its classification is published.
       // Stop at the first such round so it is retried next hour in order.
-      if (!normalized) break;
+      if (!normalized) {
+        // FIX (post-Stats-v1 audit, round 3): that reasoning only holds for a
+        // round that *just* happened — Jolpica publishing full classification
+        // can lag the race by a few hours. It does NOT hold for a round from
+        // days ago; if Jolpica has a genuine, permanent data gap for one past
+        // round, this loop would otherwise retry-and-break at that same round
+        // forever, silently freezing the cache there with no distinguishing
+        // signal between "will resolve on its own shortly" and "never will
+        // without manual intervention." Logged loudly past a generous
+        // same-day-plus-a-few-days buffer so it's at least diagnosable via
+        // Cloud Functions logs, without risking an automatic skip that could
+        // permanently lose a round Jolpica would have recovered on its own.
+        const stuckRace = races.find((race) => Number(race.round) === round);
+        const daysSinceRace = stuckRace ? (Date.now() - new Date(stuckRace.date).getTime()) / (24 * 60 * 60 * 1000) : 0;
+        if (daysSinceRace > 3) {
+          console.error(`[refreshDriverStatsCache] STUCK at round ${round} (${stuckRace?.raceName}, raced ${Math.floor(daysSinceRace)} day(s) ago) — Jolpica still returning incomplete data well past normal classification lag. Cache frozen here until this resolves.`);
+        }
+        break;
+      }
       appended.push(normalized);
     }
 
@@ -393,9 +411,23 @@ exports.getDriverCircuitHistory = onCall({ invoker: "public" }, async (request) 
   }
 
   const db = getFirestore();
-  const pairRef = db.doc(`${DRIVER_STATS_DOC}/circuits/${driverId}_${circuitId}`);
+  // FIX (post-Stats-v1 audit, round 3): the old doc ID joined driverId and
+  // circuitId with a bare "_" — both ID types already contain underscores
+  // (max_verstappen, red_bull_ring), so two genuinely different pairs could
+  // concatenate to the identical doc ID (e.g. driverId "foo_bar" + circuitId
+  // "baz" collides with driverId "foo" + circuitId "bar_baz"), silently
+  // serving one pair's cached history for a completely different request.
+  // "::" can't appear in either ID (both are regex-validated to
+  // [a-z0-9_]+ above), so the split point is unambiguous.
+  const pairId = `${driverId}::${circuitId}`;
+  const pairRef = db.doc(`${DRIVER_STATS_DOC}/circuits/${pairId}`);
   const cached = await pairRef.get();
-  if (cached.exists) return cached.data();
+  // Defense in depth against any future doc-ID scheme bug of the same
+  // shape: never trust a cache hit whose own stored driverId/circuitId
+  // don't match what was actually requested.
+  if (cached.exists && cached.data()?.driverId === driverId && cached.data()?.circuitId === circuitId) {
+    return cached.data();
+  }
 
   try {
     // Verified against a live Jolpica response (norris/albert_park): this
@@ -424,7 +456,14 @@ exports.getDriverCircuitHistory = onCall({ invoker: "public" }, async (request) 
       }),
       fetchedAt: new Date().toISOString(),
     };
-    await pairRef.set(history);
+    // FIX (post-Stats-v1 audit, round 3): a 200-OK response isn't
+    // necessarily a *complete* one — a transient Jolpica hiccup can return
+    // an empty Races array for a pair that genuinely has real history
+    // (buildplan.md's "safe to cache indefinitely" assumed correctness, not
+    // just a successful round-trip). Only persist non-empty results; an
+    // empty one is returned as-is but retried fresh on the next request
+    // instead of being trusted forever.
+    if (races.length > 0) await pairRef.set(history);
     return history;
   } catch (err) {
     console.error("[getDriverCircuitHistory] Fetch failed:", err.message);
