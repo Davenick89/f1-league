@@ -21,6 +21,7 @@ const ResultsView = React.lazy(() => import('./ResultsView.jsx'));
 const InvitesView = React.lazy(() => import('./InvitesView.jsx'));
 const CalendarView = React.lazy(() => import('./CalendarView.jsx'));
 const AuditView = React.lazy(() => import('./AuditView.jsx'));
+const StatsView = React.lazy(() => import('./StatsView.jsx'));
 
 function GroupStandingBadge({ groupId, userId }) {
   const [standing, setStanding] = React.useState(null);
@@ -791,6 +792,7 @@ export default function F1League() {
                 { view: "howToPlay",   icon: <span className="text-sm">📖</span>, label: "How to Play" },
                 { view: "calendar",    icon: <Calendar size={16} />, label: "Calendar" },
                 { view: "results",     icon: <span className="text-sm">📊</span>, label: "Results" },
+                { view: "stats",       icon: <BarChart3 size={16} />, label: "Stats" },
                 { view: "invites",     icon: <Users size={16} />, label: "Invite" },
               ].map(({ view, icon, label }) => (
                 <button
@@ -832,6 +834,7 @@ export default function F1League() {
             {currentView === "seasonBoard" && <SeasonBoardView group={selectedGroup} user={user} />}
             {currentView === "howToPlay" && <HowToPlayView />}
             {currentView === "results" && <ResultsView group={selectedGroup} user={user} currentRound={currentRound} />}
+            {currentView === "stats" && <StatsView series="f1" />}
             {currentView === "invites" && <InvitesView group={selectedGroup} user={user} generateInviteCode={generateInviteCode} inviteLink={inviteLink} inviteStats={inviteStats} onGroupUpdated={() => loadUserGroups(user.uid)} />}
             {currentView === "audit" && selectedGroup.admin === user.uid && <AuditView group={selectedGroup} />}
             </Suspense>

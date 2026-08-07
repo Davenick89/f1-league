@@ -233,6 +233,205 @@ exports.refreshScheduleCache = onSchedule({ schedule: "every 60 minutes" }, asyn
   console.log(`[refreshScheduleCache] Cached overrides for ${Object.keys(overrides).length} round(s) from ${source}`);
 });
 
+// ─── Driver/team performance stats ──────────────────────────────────────────
+// Kept under a series document from the outset so future motorsport series do
+// not require moving F1 data. Jolpica's standings are deliberately stored as
+// supplied: its points totals already account for sprints and other scoring
+// rules that would be fragile to duplicate here.
+//
+// FIX (post-buildplan-stats audit): buildplan.md's spec named the write
+// target "/system/driverStats/{series}" — a 3-segment path, which Firestore
+// treats as a COLLECTION reference, not a document (collection/document
+// segments must alternate; odd total segment count = collection). Confirmed
+// live: db.doc() on a 3-segment path throws "documentPath must point to a
+// document... does not contain an even number of components" — this would
+// have made refreshDriverStatsCache fail on every single scheduled run,
+// silently, forever (caught by its own try/catch, logged, cache never
+// populated). Fixed by using a genuine top-level `driverStats` collection
+// (sibling to `groups`/`users`/`invites`, not nested under `system`) with
+// the series as the document ID — `driverStats/f1` is a valid 2-segment
+// document path, matching the same shape as the working `/system/
+// scheduleCache` precedent this spec was modeled on (which is 2 segments
+// because "system" is the collection there and "scheduleCache" is the
+// document — there's no extra namespacing segment to push it to 3).
+const DRIVER_STATS_SERIES = "f1";
+const DRIVER_STATS_DOC = `driverStats/${DRIVER_STATS_SERIES}`;
+
+async function fetchJolpicaJson(path) {
+  const res = await fetch(`${JOLPICA_BASE_URL}${path}`);
+  if (!res.ok) throw new Error(`Jolpica HTTP ${res.status} (${path})`);
+  return res.json();
+}
+
+function standingsForRound(data, key) {
+  const lists = data?.MRData?.StandingsTable?.StandingsLists || [];
+  return (lists[0]?.[key] || []).map((entry) => ({
+    id: entry.Driver?.driverId || entry.Constructor?.constructorId,
+    name: entry.Driver
+      ? `${entry.Driver.givenName} ${entry.Driver.familyName}`
+      : entry.Constructor?.name,
+    points: Number(entry.points),
+    position: Number(entry.position),
+  }));
+}
+
+// FIX (post-buildplan-stats audit): buildplan.md's spec assumed any
+// non-numeric positionText meant DNF. Verified against ~66 real races
+// (2023-2025 seasons): the non-numeric codes that actually occur are "R"
+// (Retired), "D" (Disqualified), and "W" — which Jolpica uses for "Did not
+// start"/"Withdrew", i.e. a DNS, not a DNF. This app's own scoring.js
+// already treats DNS and DNF-but-classified as distinct categories: lumping
+// a driver who never started into "DNF" would misrepresent both drivers'
+// stats and the season's DNF totals. Any other non-numeric code (never
+// observed live) falls back to the dnf bucket rather than silently
+// dropping the result.
+function classifyPosition(positionText) {
+  const text = positionText || "";
+  if (/^\d+$/.test(text)) return { position: Number(text), dnf: false, dns: false };
+  if (text === "W") return { position: null, dnf: false, dns: true };
+  return { position: null, dnf: true, dns: false };
+}
+
+function normalizeRound(resultsData, driverStandingsData, constructorStandingsData) {
+  const race = resultsData?.MRData?.RaceTable?.Races?.[0];
+  const driverStandings = standingsForRound(driverStandingsData, "DriverStandings");
+  const constructorStandings = standingsForRound(constructorStandingsData, "ConstructorStandings");
+  if (!race || !Array.isArray(race.Results) || !race.Results.length || !driverStandings.length || !constructorStandings.length) return null;
+  return {
+    round: Number(race.round),
+    raceName: race.raceName,
+    date: race.date,
+    circuitId: race.Circuit?.circuitId,
+    circuitName: race.Circuit?.circuitName,
+    drivers: race.Results.map((result) => {
+      const { position, dnf, dns } = classifyPosition(result.positionText);
+      return {
+        driverId: result.Driver.driverId,
+        driverName: `${result.Driver.givenName} ${result.Driver.familyName}`,
+        constructorId: result.Constructor.constructorId,
+        constructorName: result.Constructor.name,
+        grid: Number(result.grid),
+        position,
+        positionText: result.positionText,
+        dnf,
+        dns,
+        points: Number(result.points),
+      };
+    }),
+    driverStandings,
+    constructorStandings,
+  };
+}
+
+exports.refreshDriverStatsCache = onSchedule({ schedule: "every 60 minutes" }, async () => {
+  const db = getFirestore();
+  const season = String(new Date().getUTCFullYear());
+  const ref = db.doc(DRIVER_STATS_DOC);
+
+  try {
+    const cacheSnap = await ref.get();
+    const existing = cacheSnap.exists && cacheSnap.data().season === season ? cacheSnap.data() : {};
+    const cachedRounds = Array.isArray(existing.rounds) ? existing.rounds : [];
+    const lastCachedRound = Number(existing.lastCachedRound || 0);
+    const scheduleData = await fetchJolpicaJson(`/ergast/f1/${season}.json?limit=100`);
+    const races = scheduleData?.MRData?.RaceTable?.Races || [];
+    const now = new Date().toISOString().slice(0, 10);
+    // FIX (post-buildplan-stats audit): a first-ever run (or one that fell
+    // behind) can have a double-digit backlog of candidate rounds — every
+    // race so far this season, on initial deploy. Reproduced live: fetching
+    // 11 backlogged rounds (3 Jolpica calls each, back-to-back) hit a 429
+    // rate limit partway through. Capped per-invocation so a large backlog
+    // is worked off gradually across several hourly runs instead of one
+    // burst, with a short spacing between rounds as further headroom.
+    const MAX_ROUNDS_PER_RUN = 5;
+    const candidateRounds = races
+      .map((race) => Number(race.round))
+      .filter((round) => round > lastCachedRound && races.find((race) => Number(race.round) === round)?.date <= now)
+      .sort((a, b) => a - b)
+      .slice(0, MAX_ROUNDS_PER_RUN);
+
+    const appended = [];
+    for (const round of candidateRounds) {
+      if (appended.length) await new Promise((resolve) => setTimeout(resolve, 500));
+      const [results, drivers, constructors] = await Promise.all([
+        fetchJolpicaJson(`/ergast/f1/${season}/${round}/results.json?limit=100`),
+        fetchJolpicaJson(`/ergast/f1/${season}/${round}/driverStandings.json?limit=100`),
+        fetchJolpicaJson(`/ergast/f1/${season}/${round}/constructorStandings.json?limit=100`),
+      ]);
+      const normalized = normalizeRound(results, drivers, constructors);
+      // A scheduled race can be present before its classification is published.
+      // Stop at the first such round so it is retried next hour in order.
+      if (!normalized) break;
+      appended.push(normalized);
+    }
+
+    if (!appended.length) {
+      console.log(`[refreshDriverStatsCache] No new classified rounds for ${season}; keeping cache unchanged`);
+      return;
+    }
+
+    const rounds = [...cachedRounds, ...appended];
+    await ref.set({
+      series: DRIVER_STATS_SERIES,
+      season,
+      lastCachedRound: appended[appended.length - 1].round,
+      rounds,
+      fetchedAt: new Date().toISOString(),
+    });
+    console.log(`[refreshDriverStatsCache] Cached ${appended.length} new round(s), through round ${appended[appended.length - 1].round}`);
+  } catch (err) {
+    // Never clear or overwrite an existing cache document when Jolpica fails.
+    console.error("[refreshDriverStatsCache] Fetch failed, keeping existing cache:", err.message);
+  }
+});
+
+exports.getDriverCircuitHistory = onCall({ invoker: "public" }, async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "You must be signed in to view driver history.");
+  const { series, driverId, circuitId } = request.data || {};
+  if (series !== DRIVER_STATS_SERIES || !/^[a-z0-9_]+$/.test(driverId || "") || !/^[a-z0-9_]+$/.test(circuitId || "")) {
+    throw new HttpsError("invalid-argument", "Invalid series, driver, or circuit.");
+  }
+
+  const db = getFirestore();
+  const pairRef = db.doc(`${DRIVER_STATS_DOC}/circuits/${driverId}_${circuitId}`);
+  const cached = await pairRef.get();
+  if (cached.exists) return cached.data();
+
+  try {
+    // Verified against a live Jolpica response (norris/albert_park): this
+    // chained all-seasons endpoint is supported, avoiding needless scans.
+    const data = await fetchJolpicaJson(`/ergast/f1/drivers/${driverId}/circuits/${circuitId}/results.json?limit=100`);
+    const races = data?.MRData?.RaceTable?.Races || [];
+    const history = {
+      series,
+      driverId,
+      circuitId,
+      races: races.map((race) => {
+        const result = race.Results?.[0];
+        const { position, dnf, dns } = classifyPosition(result?.positionText);
+        return {
+          season: race.season,
+          round: Number(race.round),
+          raceName: race.raceName,
+          date: race.date,
+          position,
+          positionText: result?.positionText,
+          grid: Number(result?.grid),
+          points: Number(result?.points),
+          dnf,
+          dns,
+        };
+      }),
+      fetchedAt: new Date().toISOString(),
+    };
+    await pairRef.set(history);
+    return history;
+  } catch (err) {
+    console.error("[getDriverCircuitHistory] Fetch failed:", err.message);
+    throw new HttpsError("unavailable", "Driver circuit history is temporarily unavailable.");
+  }
+});
+
 // Test-only seam for the local emulator: exposes the pure schedule-math
 // helpers so a test script can assert on them directly (e.g. "does an
 // OpenF1-sourced override actually change getPredictionLockTime's output"),

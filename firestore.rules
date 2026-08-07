@@ -348,5 +348,22 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // FIX (post-buildplan-stats audit): the spec's original path,
+    // /system/driverStats/{series}, is a 3-segment (odd) path — Firestore
+    // resolves that to a COLLECTION, not a document, so the corresponding
+    // Admin SDK write in functions/index.js could never actually target a
+    // document at that path. Moved to a genuine top-level `driverStats`
+    // collection (sibling to `groups`/`invites` below, not nested under
+    // `system`) with the series as the document ID — see functions/index.js
+    // for the full explanation.
+    match /driverStats/{series} {
+      allow read: if isAuth();
+      allow write: if false;
+    }
+    match /driverStats/{series}/circuits/{pairId} {
+      allow read: if isAuth();
+      allow write: if false;
+    }
+
   }
 }
