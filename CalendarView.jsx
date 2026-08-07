@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
-import { db, F1_SCHEDULE_2026, getPredictionLockTime, getTimeUntilLock, getValidatedApiSessionStr, isEditLocked, saveRoundScores, useF1ApiSchedule } from './shared.js';
+import { db, F1_SCHEDULE_2026, getPredictionLockTime, getTimeUntilLock, getValidatedApiSessionStr, isEditLocked, saveRoundScores, useF1ApiSchedule, useOnlineStatus } from './shared.js';
 
 function CalendarView({ group, user, currentRound }) {
   const [loading, setLoading] = useState(true);
@@ -12,6 +12,8 @@ function CalendarView({ group, user, currentRound }) {
   const [filter, setFilter] = useState('all');
   const [currentCountdown, setCurrentCountdown] = useState('');
   const [refreshTick, setRefreshTick] = useState(0);
+  const [lastSyncedAt, setLastSyncedAt] = useState(null);
+  const isOnline = useOnlineStatus();
   const { apiData } = useF1ApiSchedule(2026);
 
   useEffect(() => {
@@ -48,6 +50,7 @@ function CalendarView({ group, user, currentRound }) {
           nicknames[memberId] = predsMap[memberId]?.nickname || "?";
         });
         setMemberNicknames(nicknames);
+        setLastSyncedAt(new Date());
       } catch (e) {
         console.error("Calendar load error:", e);
       } finally {
@@ -290,14 +293,17 @@ function CalendarView({ group, user, currentRound }) {
 
   return (
     <div className="bg-gray-900 border border-red-600/50 rounded-lg p-6">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 gap-3">
         <h2 className="text-2xl font-bold" style={{ fontFamily: "'Orbitron'" }}>🗓️ 2026 F1 CALENDAR</h2>
-        <button
-          onClick={() => setRefreshTick(t => t + 1)}
-          className="px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded border border-gray-700 transition"
-        >
-          ↻ Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {!isOnline && lastSyncedAt && <span className="text-xs text-yellow-400 text-right">Offline — showing data from last sync at {lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
+          <button
+            onClick={() => setRefreshTick(t => t + 1)}
+            className="px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded border border-gray-700 transition"
+          >
+            ↻ Refresh
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-2 mb-5 flex-wrap">

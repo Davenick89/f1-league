@@ -5,7 +5,7 @@
 import { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { collection, doc, getDocs, getFirestore, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, getDocs, initializeFirestore, persistentLocalCache, setDoc, writeBatch } from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
 import { getMessaging, onMessage } from 'firebase/messaging';
 import { getAnalytics, logEvent, isSupported as analyticsIsSupported } from 'firebase/analytics';
@@ -26,8 +26,27 @@ export const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY;
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 setPersistence(auth, browserLocalPersistence).catch(e => console.error("Auth error:", e));
-export const db = getFirestore(app);
+export const db = initializeFirestore(app, { localCache: persistentLocalCache() });
 export const functions = getFunctions(app);
+
+// Shared browser connectivity state. Firestore listeners independently report
+// cached snapshots; this hook is for UI that must block writes while offline.
+export function useOnlineStatus() {
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+
+  useEffect(() => {
+    const setOnline = () => setIsOnline(true);
+    const setOffline = () => setIsOnline(false);
+    window.addEventListener('online', setOnline);
+    window.addEventListener('offline', setOffline);
+    return () => {
+      window.removeEventListener('online', setOnline);
+      window.removeEventListener('offline', setOffline);
+    };
+  }, []);
+
+  return isOnline;
+}
 
 // ─── Analytics ────────────────────────────────────────────────────────────────
 // Initialised lazily — GA4 requires a browser environment and a valid

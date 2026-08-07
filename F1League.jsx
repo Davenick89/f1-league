@@ -3,12 +3,13 @@ import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import { collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { getToken } from 'firebase/messaging';
+import { registerSW } from 'virtual:pwa-register';
 import { validateNickname, validateGroupName, validateInviteCode } from './validation.js';
 import { LogOut, Plus, Users, Trophy, BarChart3, Settings, Calendar } from 'lucide-react';
 import {
   auth, db, functions, VAPID_KEY, track, fcmSupported, getMessagingInstance,
   F1_SCHEDULE_2026, getCurrentRound, getTimeUntilLock, getValidatedApiSessionStr,
-  syncScheduleWithAPI, useF1ApiSchedule,
+  syncScheduleWithAPI, useF1ApiSchedule, useOnlineStatus,
 } from './shared.js';
 
 const AdminWizard = React.lazy(() => import('./AdminWizard.jsx'));
@@ -146,6 +147,19 @@ export default function F1League() {
   const [showNicknameSetup, setShowNicknameSetup] = useState(false);
   const [googleFirstName, setGoogleFirstName] = useState('');
   const [message, setMessage] = useState("");
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updateServiceWorker, setUpdateServiceWorker] = useState(null);
+  const isOnline = useOnlineStatus();
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const updateSW = registerSW({
+      onNeedRefresh() {
+        setUpdateServiceWorker(() => updateSW);
+        setUpdateAvailable(true);
+      },
+    });
+  }, []);
 
   // Run schedule sync once on mount — diagnostic only (console.error on drift,
   // doesn't feed any user-visible state), so it's deferred off the critical
@@ -745,6 +759,18 @@ export default function F1League() {
   return (
     <div className="min-h-screen bg-black text-white">
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap');`}</style>
+
+      {!isOnline && (
+        <div className="sticky top-0 z-[60] bg-yellow-500 px-4 py-2 text-center text-sm font-bold text-black">
+          You're offline — showing last-synced data. Reconnect to submit predictions.
+        </div>
+      )}
+      {updateAvailable && (
+        <div className="sticky top-0 z-[60] flex items-center justify-center gap-3 bg-red-600 px-4 py-2 text-sm font-bold text-white">
+          <span>Update available.</span>
+          <button onClick={() => updateServiceWorker?.(true)} className="rounded bg-white px-3 py-1 text-xs font-black text-red-700">Tap to refresh</button>
+        </div>
+      )}
 
       <nav style={{ background: 'rgba(0,0,0,0.97)', borderBottom: '1px solid rgba(220,0,0,0.3)' }} className="sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">

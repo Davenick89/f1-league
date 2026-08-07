@@ -211,12 +211,14 @@ function PlayerSummaryModal({ group, playerId, playerName, currentRound, onClose
 function LeaderboardView({ group, currentRound, user }) {
   const [leaderboard, setLeaderboard] = useState([]);
   const [selectedPlayer, setSelectedPlayer] = React.useState(null);
+  const [isShowingCachedData, setIsShowingCachedData] = React.useState(false);
 
   useEffect(() => {
     if (!group) return;
 
     const unsubscribe = onSnapshot(collection(db, `groups/${group.id}/scores`), async (snapshot) => {
       try {
+        setIsShowingCachedData(snapshot.metadata.fromCache);
         // FIX (Track C #15): 'summary' is a precomputed rank/total doc
         // written alongside real per-player score docs (see ResultsView.jsx),
         // not a player — must be excluded here or it renders as a phantom
@@ -250,6 +252,7 @@ function LeaderboardView({ group, currentRound, user }) {
     <div>
       {user && <UserStatsCard group={group} userId={user.uid} currentRound={currentRound} />}
       <div className="bg-gray-950 border border-gray-800 rounded-2xl p-6">
+        {isShowingCachedData && <p className="text-xs text-yellow-400 mb-3">Offline — showing last-synced standings.</p>}
         <h2 className="text-xl font-black mb-1 tracking-wider" style={{ fontFamily: 'Orbitron' }}>CHAMPIONSHIP</h2>
         <p className="text-xs text-gray-600 tracking-widest mb-5">STANDINGS</p>
         {leaderboard.length === 0 ? (

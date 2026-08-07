@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, doc, getDoc, setDoc, onSnapshot, serverTimestamp, Timestamp, writeBatch } from 'firebase/firestore';
 import { Edit, Info, Lock, X } from 'lucide-react';
-import { db, functions, F1_DRIVERS, formatLockTimeIST, getDisplayName, getPredictionLockTime, getPredictionOpenTime, getValidatedApiSessionStr, track, useF1ApiSchedule } from './shared.js';
+import { db, functions, F1_DRIVERS, formatLockTimeIST, getDisplayName, getPredictionLockTime, getPredictionOpenTime, getValidatedApiSessionStr, track, useF1ApiSchedule, useOnlineStatus } from './shared.js';
 import { rfDistance, rfPoints, scoreRace } from './scoring.js';
 import { validatePredictions } from './validation.js';
 
@@ -168,6 +168,8 @@ function InfoBtn({ fieldKey, onOpen }) {
 
 // PREDICTION VIEW - COMPLETE REBUILD
 function PredictionView({ group, race, currentRound, countdown, user }) {
+  const isOnline = useOnlineStatus();
+  const isOffline = !isOnline;
   const { apiData } = useF1ApiSchedule(2026);
   const [predictions, setPredictions] = useState({
     pole: "",
@@ -421,6 +423,10 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
   };
 
   const handleSavePredictions = async () => {
+    if (isOffline) {
+      setMessage('Reconnect to submit predictions');
+      return;
+    }
     try {
       const validation = validatePredictions(predictions, !!race?.isSprint);
       if (!validation.valid) {
@@ -776,11 +782,12 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
             </div>
             <button
               onClick={handleSavePredictions}
-              disabled={isNotYetOpen}
+              disabled={isNotYetOpen || isOffline}
               className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg transition-colors"
             >
-              {isNotYetOpen ? '🗓️ Opens Monday' : 'SAVE PREDICTIONS'}
+              {isNotYetOpen ? '🗓️ Opens Monday' : isOffline ? 'RECONNECT TO SUBMIT PREDICTIONS' : 'SAVE PREDICTIONS'}
             </button>
+            {isOffline && <p className="text-center text-sm mt-3 text-yellow-400">Reconnect to submit predictions</p>}
           </>
         ) : null}
 
