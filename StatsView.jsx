@@ -1,14 +1,45 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { Line, LineChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { db, functions } from './shared.js';
 
-const COLORS = ['#e10600', '#00d2be', '#ff8700', '#3671c6', '#52e252', '#6692ff', '#ff8000', '#f596c8'];
+// Real 2026-grid team colors, keyed by Jolpica's constructorId, so the
+// points-progression chart reads at a glance the way real F1 graphics do.
+// Two drivers on the same team intentionally share their team's color —
+// the legend/toggle buttons already disambiguate by name, and matching
+// colors is the whole point of this fix (a driver's line should read as
+// "that team's color", not an arbitrary palette slot).
+const TEAM_COLORS = {
+  ferrari: '#E8002D',
+  mclaren: '#FF8000',
+  mercedes: '#00D7B6',
+  red_bull: '#1E41FF',
+  aston_martin: '#229971',
+  alpine: '#FF87BC',
+  williams: '#00A0DE',
+  rb: '#6692FF',
+  haas: '#B6BABD',
+  audi: '#8B1E3F',
+  cadillac: '#C9A44C',
+};
+const FALLBACK_COLOR = '#9CA3AF';
+
+// Picks readable black/white text against an arbitrary team color background
+// (relative luminance) rather than hardcoding one text color that would be
+// illegible against roughly half of an 11-color, largely-saturated palette.
+function readableTextColor(hex) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.5 ? '#0a0a0a' : '#ffffff';
+}
+
 const card = 'bg-gray-950 border border-gray-800 rounded-2xl p-5';
 
-function Select({ value, onChange, children, className = '' }) {
-  return <select value={value} onChange={(event) => onChange(event.target.value)} className={`bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white ${className}`}>{children}</select>;
+function Select({ value, onChange, children, className = '', disabled = false }) {
+  return <select value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} className={`bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white disabled:opacity-50 ${className}`}>{children}</select>;
 }
 
 export default function StatsView({ series }) {
@@ -22,6 +53,7 @@ export default function StatsView({ series }) {
   const [historyCircuit, setHistoryCircuit] = useState('');
   const [history, setHistory] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [allCircuits, setAllCircuits] = useState([]);
 
   // FIX (post-buildplan-stats audit): 'system/driverStats/{series}' is a
   // 3-segment (odd) path — Firestore resolves that to a collection, not a
@@ -31,27 +63,61 @@ export default function StatsView({ series }) {
     (snapshot) => { setStats(snapshot.exists() ? snapshot.data() : null); setError(''); },
     () => setError('Performance stats could not be loaded.')), [series]);
 
+  // FIX: Track history's circuit picker used to be derived from this
+  // season's cached rounds — capped at whatever refreshDriverStatsCache had
+  // backfilled so far (as few as 5), and identical for every driver since
+  // it was never actually driver-specific to begin with. Track history is
+  // an all-time lookup (getDriverCircuitHistory queries every season via
+  // Jolpica's chained filter), so the picker should offer every circuit
+  // that's ever hosted a round, independent of this season's cache state —
+  // fetched once, client-side, same pattern useF1ApiSchedule already uses
+  // for the calendar.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('https://api.jolpi.ca/ergast/f1/circuits.json?limit=100')
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        const list = (data?.MRData?.CircuitTable?.Circuits || [])
+          .map((circuit) => ({ id: circuit.circuitId, name: circuit.circuitName }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        setAllCircuits(list);
+      })
+      .catch(() => { if (!cancelled) setError((prev) => prev || 'Could not load the circuit list.'); });
+    return () => { cancelled = true; };
+  }, []);
+
   const rounds = stats?.rounds || [];
   const drivers = useMemo(() => {
     const entries = new Map();
-    rounds.forEach((round) => round.drivers?.forEach((driver) => entries.set(driver.driverId, driver.driverName)));
-    return [...entries.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+    rounds.forEach((round) => round.drivers?.forEach((driver) => entries.set(driver.driverId, { name: driver.driverName, constructorId: driver.constructorId })));
+    return [...entries.entries()].map(([id, { name, constructorId }]) => ({ id, name, constructorId })).sort((a, b) => a.name.localeCompare(b.name));
   }, [rounds]);
   const constructors = useMemo(() => {
     const entries = new Map();
     rounds.forEach((round) => round.drivers?.forEach((driver) => entries.set(driver.constructorId, driver.constructorName)));
     return [...entries.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   }, [rounds]);
-  const circuits = useMemo(() => [...new Map(rounds.filter((round) => round.circuitId).map((round) => [round.circuitId, round.circuitName])).entries()]
-    .map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)), [rounds]);
 
+  // FIX (post-user-feedback): this used to key its "default to first 4" line
+  // off `selectedDrivers.length`, which meant clicking Clear (selectedDrivers
+  // -> []) immediately re-triggered the same effect, saw an empty array, and
+  // refilled it right back — Clear could never actually clear anything. Same
+  // bug already existed for a user manually deselecting all 4 by hand, just
+  // less likely to be hit than a single Clear click. `initializedDriversRef`
+  // makes the default-selection a true one-time-on-load behavior instead of
+  // "whenever the array happens to be empty."
+  const initializedDriversRef = useRef(false);
   useEffect(() => {
-    if (!selectedDrivers.length && drivers.length) setSelectedDrivers(drivers.slice(0, 4).map((driver) => driver.id));
+    if (!initializedDriversRef.current && drivers.length) {
+      setSelectedDrivers(drivers.slice(0, 4).map((driver) => driver.id));
+      initializedDriversRef.current = true;
+    }
     if (!firstDriver && drivers.length) setFirstDriver(drivers[0].id);
     if (!secondDriver && drivers.length > 1) setSecondDriver(drivers[1].id);
     if (!historyDriver && drivers.length) setHistoryDriver(drivers[0].id);
-    if (!historyCircuit && circuits.length) setHistoryCircuit(circuits[0].id);
-  }, [drivers, circuits, selectedDrivers.length, firstDriver, secondDriver, historyDriver, historyCircuit]);
+    if (!historyCircuit && allCircuits.length) setHistoryCircuit(allCircuits[0].id);
+  }, [drivers, allCircuits, firstDriver, secondDriver, historyDriver, historyCircuit]);
 
   const progression = useMemo(() => rounds.map((round) => {
     const standings = chartType === 'drivers' ? round.driverStandings : round.constructorStandings;
@@ -59,6 +125,7 @@ export default function StatsView({ series }) {
   }), [rounds, chartType]);
   const chartOptions = chartType === 'drivers' ? drivers : constructors;
   const selectedChartEntries = chartOptions.filter((entry) => selectedDrivers.includes(entry.id));
+  const colorFor = (entry) => TEAM_COLORS[chartType === 'drivers' ? entry.constructorId : entry.id] || FALLBACK_COLOR;
   const summary = useMemo(() => drivers.map((driver) => {
     const results = rounds.flatMap((round) => round.drivers?.filter((entry) => entry.driverId === driver.id) || []);
     return { ...driver, wins: results.filter((result) => result.position === 1).length, podiums: results.filter((result) => result.position && result.position <= 3).length, dnfs: results.filter((result) => result.dnf).length };
@@ -109,8 +176,21 @@ export default function StatsView({ series }) {
 
     <section className={card}>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4"><h2 className="font-bold text-white">Points progression</h2><div className="flex gap-2"><button onClick={() => { setChartType('drivers'); setSelectedDrivers(drivers.slice(0, 4).map((driver) => driver.id)); }} className={`px-3 py-1.5 rounded-lg text-sm ${chartType === 'drivers' ? 'bg-red-600 text-white' : 'bg-gray-900 text-gray-400'}`}>Drivers</button><button onClick={() => { setChartType('constructors'); setSelectedDrivers(constructors.slice(0, 4).map((team) => team.id)); }} className={`px-3 py-1.5 rounded-lg text-sm ${chartType === 'constructors' ? 'bg-red-600 text-white' : 'bg-gray-900 text-gray-400'}`}>Constructors</button></div></div>
-      <div className="flex flex-wrap gap-2 mb-4">{chartOptions.map((entry) => <button key={entry.id} onClick={() => setSelectedDrivers((selected) => selected.includes(entry.id) ? selected.filter((id) => id !== entry.id) : [...selected, entry.id])} className={`text-xs px-2 py-1 rounded ${selectedDrivers.includes(entry.id) ? 'bg-gray-700 text-white' : 'bg-gray-900 text-gray-500'}`}>{entry.name}</button>)}</div>
-      <div className="h-72"><ResponsiveContainer><LineChart data={progression}><CartesianGrid stroke="#262626" /><XAxis dataKey="round" stroke="#737373" /><YAxis stroke="#737373" /><Tooltip contentStyle={{ background: '#171717', border: '1px solid #404040' }} /><Legend />{selectedChartEntries.map((entry, index) => <Line key={entry.id} type="monotone" dataKey={entry.id} name={entry.name} stroke={COLORS[index % COLORS.length]} strokeWidth={2} connectNulls />)}</LineChart></ResponsiveContainer></div>
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <button onClick={() => setSelectedDrivers(chartOptions.map((entry) => entry.id))} className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 font-semibold">Select All</button>
+        <button onClick={() => setSelectedDrivers([])} className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 font-semibold">Clear</button>
+        <span className="w-px h-4 bg-gray-800" />
+        {chartOptions.map((entry) => <button key={entry.id} onClick={() => setSelectedDrivers((selected) => selected.includes(entry.id) ? selected.filter((id) => id !== entry.id) : [...selected, entry.id])} style={selectedDrivers.includes(entry.id) ? { background: colorFor(entry), color: readableTextColor(colorFor(entry)) } : undefined} className={`text-xs px-2 py-1 rounded font-semibold ${selectedDrivers.includes(entry.id) ? '' : 'bg-gray-900 text-gray-500'}`}>{entry.name}</button>)}
+      </div>
+      {/* FIX: explicit w-full alongside the fixed h-72 so ResponsiveContainer
+          always has an unambiguous, non-zero size to measure — reported
+          flatlining on mobile that didn't reproduce under Playwright's
+          device emulation (real recharts SVG paths with real data, checked
+          directly, both there and on desktop); this is the standard
+          defensive fix for this exact class of ResponsiveContainer sizing
+          issue and is harmless either way, but flagging it's unconfirmed on
+          an actual device. */}
+      <div className="h-72 w-full"><ResponsiveContainer width="100%" height="100%" minWidth={280}><LineChart data={progression}><CartesianGrid stroke="#262626" /><XAxis dataKey="round" stroke="#737373" /><YAxis stroke="#737373" /><Tooltip contentStyle={{ background: '#171717', border: '1px solid #404040' }} /><Legend />{selectedChartEntries.map((entry) => <Line key={entry.id} type="monotone" dataKey={entry.id} name={entry.name} stroke={colorFor(entry)} strokeWidth={2} connectNulls />)}</LineChart></ResponsiveContainer></div>
     </section>
 
     <section className={card}><h2 className="font-bold text-white mb-4">Qualifying vs race</h2><p className="text-xs text-gray-500 mb-3">Positive values indicate positions gained from the grid to the classified race finish.</p><div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-gray-500"><tr><th className="pb-2">Driver</th><th className="pb-2">Total delta</th><th className="pb-2">Avg / classified race</th></tr></thead><tbody>{deltas.map((driver) => <tr key={driver.id} className="border-t border-gray-900"><td className="py-2 text-white">{driver.name}</td><td className={driver.delta >= 0 ? 'text-emerald-400' : 'text-red-400'}>{driver.delta > 0 ? '+' : ''}{driver.delta}</td><td className="text-gray-300">{driver.average > 0 ? '+' : ''}{driver.average.toFixed(1)}</td></tr>)}</tbody></table></div></section>
@@ -119,6 +199,6 @@ export default function StatsView({ series }) {
 
     <section className={card}><h2 className="font-bold text-white mb-4">Head-to-head</h2><div className="flex flex-wrap gap-3 mb-4"><Select value={firstDriver} onChange={setFirstDriver}>{drivers.map((driver) => <option value={driver.id} key={driver.id}>{driver.name}</option>)}</Select><Select value={secondDriver} onChange={setSecondDriver}>{drivers.map((driver) => <option value={driver.id} key={driver.id}>{driver.name}</option>)}</Select></div>{headToHead.length ? <><p className="text-sm text-gray-300 mb-3"><span className="text-white font-bold">{drivers.find((driver) => driver.id === firstDriver)?.name}: {h2hWins.first}</span> · <span className="text-white font-bold">{drivers.find((driver) => driver.id === secondDriver)?.name}: {h2hWins.second}</span> race finishes ahead</p><div className="space-y-2">{headToHead.map((race) => <div key={race.round} className="text-sm flex justify-between border-t border-gray-900 pt-2"><span className="text-gray-400">R{race.round} · {race.raceName}{race.teammates ? ' · teammates' : ''}</span><span className="text-white">{race.first.positionText} — {race.second.positionText}</span></div>)}</div></> : <p className="text-sm text-gray-500">These drivers haven't both raced in a cached round this season.</p>}</section>
 
-    <section className={card}><h2 className="font-bold text-white mb-4">Track history</h2><div className="flex flex-wrap gap-3"><Select value={historyDriver} onChange={setHistoryDriver}>{drivers.map((driver) => <option value={driver.id} key={driver.id}>{driver.name}</option>)}</Select><Select value={historyCircuit} onChange={setHistoryCircuit}>{circuits.map((circuit) => <option value={circuit.id} key={circuit.id}>{circuit.name}</option>)}</Select><button onClick={loadHistory} disabled={historyLoading} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{historyLoading ? 'Loading…' : 'Look up history'}</button></div>{history && <div className="mt-4 text-sm text-gray-300"><p className="mb-2">{history.races.length} starts at this circuit</p><div className="space-y-1">{history.races.map((race) => <div key={`${race.season}-${race.round}`} className="flex justify-between border-t border-gray-900 pt-1"><span>{race.season} · {race.raceName}</span><span>{race.positionText} (grid {race.grid})</span></div>)}</div></div>}</section>
+    <section className={card}><h2 className="font-bold text-white mb-4">Track history</h2><div className="flex flex-wrap gap-3"><Select value={historyDriver} onChange={setHistoryDriver}>{drivers.map((driver) => <option value={driver.id} key={driver.id}>{driver.name}</option>)}</Select><Select value={historyCircuit} onChange={setHistoryCircuit} disabled={!allCircuits.length}>{allCircuits.length ? allCircuits.map((circuit) => <option value={circuit.id} key={circuit.id}>{circuit.name}</option>) : <option>Loading circuits…</option>}</Select><button onClick={loadHistory} disabled={historyLoading || !allCircuits.length} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{historyLoading ? 'Loading…' : 'Look up history'}</button></div>{history && <div className="mt-4 text-sm text-gray-300"><p className="mb-2">{history.races.length} starts at this circuit</p><div className="space-y-1">{history.races.map((race) => <div key={`${race.season}-${race.round}`} className="flex justify-between border-t border-gray-900 pt-1"><span>{race.season} · {race.raceName}</span><span>{race.positionText} (grid {race.grid})</span></div>)}</div></div>}</section>
   </div>;
 }
