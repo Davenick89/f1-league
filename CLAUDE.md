@@ -361,3 +361,15 @@ wrong, not just the lock-gating logic:**
   matters, one would need to be built.
 
 To reconnect from phone: SSH → `tmux attach -t f1-league` → `claude`
+
+### Update — 2026-08-07: browser MCP confirmed working
+Playwright MCP verified end-to-end through the real tool chain (not just a
+bypass script) — navigation, console reading, screenshots all working for
+both Claude Code and Codex (Codex needs interactive mode, see SOP). Version
+now pinned (`@playwright/mcp@0.0.79`) instead of `@latest` in all three
+registrations, since a floating version broke navigation once already
+(browser build mismatch) — see `~/CODEX_MODEL_SOP.md` for the fix and
+upgrade procedure. Also confirmed via a clean browser console check: the
+`F1_SCHEDULE_2026` drift issue flagged in the previous status update
+appears already resolved (0 console errors on a fresh page load, vs 20
+schedule-sync errors seen before).
