@@ -66,26 +66,31 @@ export default function StatsView({ series }) {
   // FIX: Track history's circuit picker used to be derived from this
   // season's cached rounds — capped at whatever refreshDriverStatsCache had
   // backfilled so far (as few as 5), and identical for every driver since
-  // it was never actually driver-specific to begin with. Track history is
-  // an all-time lookup (getDriverCircuitHistory queries every season via
-  // Jolpica's chained filter), so the picker should offer every circuit
-  // that's ever hosted a round, independent of this season's cache state —
-  // fetched once, client-side, same pattern useF1ApiSchedule already uses
-  // for the calendar.
+  // it was never actually driver-specific to begin with. First fix pulled
+  // from Jolpica's full ~78-circuit all-time list, but that's overkill for
+  // a fan-facing picker — nobody needs 1950s-era defunct circuits in the
+  // dropdown. Settled on the current season's actual calendar instead (23
+  // circuits): fetches the season schedule directly (same endpoint
+  // refreshDriverStatsCache uses to find candidate rounds), independent of
+  // driverStats' own backlog state, and lists every round on the calendar
+  // — including ones that haven't happened yet — since the lookup itself
+  // (getDriverCircuitHistory) is all-time regardless of what's cached.
   useEffect(() => {
+    if (!stats?.season) return;
     let cancelled = false;
-    fetch('https://api.jolpi.ca/ergast/f1/circuits.json?limit=100')
+    fetch(`https://api.jolpi.ca/ergast/f1/${stats.season}.json?limit=100`)
       .then((res) => res.json())
       .then((data) => {
         if (cancelled) return;
-        const list = (data?.MRData?.CircuitTable?.Circuits || [])
-          .map((circuit) => ({ id: circuit.circuitId, name: circuit.circuitName }))
+        const races = data?.MRData?.RaceTable?.Races || [];
+        const list = [...new Map(races.filter((race) => race.Circuit).map((race) => [race.Circuit.circuitId, race.Circuit.circuitName])).entries()]
+          .map(([id, name]) => ({ id, name }))
           .sort((a, b) => a.name.localeCompare(b.name));
         setAllCircuits(list);
       })
       .catch(() => { if (!cancelled) setError((prev) => prev || 'Could not load the circuit list.'); });
     return () => { cancelled = true; };
-  }, []);
+  }, [stats?.season]);
 
   const rounds = stats?.rounds || [];
   const drivers = useMemo(() => {
