@@ -22,12 +22,17 @@ A React single-page app for running an F1 predictions league among friends. Play
 ## Key files
 | File | Purpose |
 |---|---|
-| `F1League.jsx` | Entire frontend — ~4460 lines, single-file SPA (see structure below) |
+| `F1League.jsx` | Root shell — ~1140 lines. Auth, routing between views, global state. Lazy-loads the 9 view files below (see structure below) |
+| `shared.js` | Firebase init, `F1_SCHEDULE_2026`, lock-time helpers, `useF1ApiSchedule`, `useOnlineStatus`, `saveRoundScores`, `waitForServerAck` |
 | `scoring.js` | Canonical scoring engine — `scoreRace()`, `rfDistance()`, `rfPoints()` |
 | `firestore.rules` | Security rules — all auth/lock logic lives here |
 | `functions/index.js` | Cloud Functions (v2, scheduled) — see below |
 | `validation.js` | Input validation helpers — `sanitizeInput`, `validateGroupName`, `validateNickname`, `validateDriverName`, `validateInviteCode`, `validatePredictions` |
-| `vite.config.js` | Vite config — dev server on port 5173 |
+| `vite.config.js` | Vite config — dev server on port 5173, `vite-plugin-pwa` (service worker/manifest) |
+| `sw-src/firebase-messaging-sw.js` | Service worker source — merged FCM push handling + Workbox app-shell precaching (built to `dist/firebase-messaging-sw.js`) |
+| `scripts/inject-sw-env.js` | Postbuild script — injects Firebase env vars into the built service worker (also runs as a `firebase.json` hosting `predeploy` hook, so it can't be skipped) |
+| `scripts/generate-icons.js` | One-off script (sharp) — rasterizes `public/icons/icon.svg` into the PWA icon set |
+| `buildplan.md` | Spec doc for the Track D (PWA) build — implemented, kept for reference |
 | `.claude/launch.json` | Dev server configs for Claude Code browser preview |
 | `security/INCIDENT_RESPONSE.md` | Rollback procedures, deploy-phase checklists, backup/restore commands |
 | `security/backup.sh`, `security/integrity-check.cjs` | Firestore backup and document-count integrity check |
@@ -35,21 +40,30 @@ A React single-page app for running an F1 predictions league among friends. Play
 There is no test suite (no test runner configured in `package.json` or `functions/package.json`).
 
 ### F1League.jsx structure
-Single file, no router — view switching is done via local state. Top-level pieces, in file order:
-`LandingPage` → `SetNicknameModal` → `F1League` (root component, holds most state/handlers) → `AdminWizard` (league creation) → `LeaderboardView` / `UserStatsCard` / `PlayerSummaryModal` → `PredictionView` (the per-race prediction form) → `SeasonBoardView` → `HowToPlayView` → `useF1ApiSchedule` (fetches the season calendar) → `ResultsView` (admin result entry + scoring trigger) → `LeagueSettingsCard` → `InvitesView` → `CalendarView` → `AuditView`.
+Code-split (Track C) — no router, view switching is done via local state, and 9 views are `React.lazy`-loaded from their own files. Top-level pieces:
+`LandingPage` → `SetNicknameModal` → `F1League` (root component, holds most state/handlers) → lazy: `AdminWizard.jsx` (league creation) → `LeaderboardView.jsx` (+ `UserStatsCard` / `PlayerSummaryModal`) → `PredictionView.jsx` (the per-race prediction form) → `SeasonBoardView.jsx` → `HowToPlayView.jsx` → `ResultsView.jsx` (admin result entry + scoring trigger) → `InvitesView.jsx` (+ `LeagueSettingsCard`) → `CalendarView.jsx` → `AuditView.jsx`. Shared helpers (Firebase init, schedule data, lock-time math, hooks) live in `shared.js`, imported by all of the above.
 
-Race schedule/session times come from the public **Jolpica Ergast API** (`https://api.jolpi.ca/ergast/f1/{season}.json`), fetched client-side — there is no local schedule data.
+Race schedule/session times come from the public **Jolpica Ergast API** (`https://api.jolpi.ca/ergast/f1/{season}.json`), fetched client-side, with an hourly Cloud Function (`refreshScheduleCache`) caching validated overrides to `/system/scheduleCache` (OpenF1 as a backup source if Jolpica is unreachable) — see `F1_SCHEDULE_2026` in `shared.js`/`functions/index.js` for the hardcoded fallback.
 
-Push notifications use Firebase Cloud Messaging (`getMessaging`, service worker at `public/firebase-messaging-sw.js`), separate from the scheduled email reminders sent by Cloud Functions.
+Push notifications use Firebase Cloud Messaging (`getMessaging`), via a service worker built from `sw-src/firebase-messaging-sw.js` (source) to `dist/firebase-messaging-sw.js` (served) — the build merges FCM push handling with Workbox app-shell precaching via `vite-plugin-pwa`'s `injectManifest` strategy. See "PWA support" below.
 
 Scoring is computed **client-side**, not in a Cloud Function: when an admin enters/edits results in `ResultsView` (`handleSaveResults`), it calls `scoreRace()` / `rfDistance()` / `rfPoints()` from `scoring.js` directly and writes the result to `/groups/{groupId}/scores/{userId}`.
 
 ### Cloud Functions (`functions/index.js`)
-All are scheduled (`onSchedule`) except the unsubscribe endpoint:
-- `sendPredictionReminders` — emails players before lock
-- `autoLockRound` — every 5 min, locks predictions once the lock time passes
+All are scheduled (`onSchedule`) except the two callable/request endpoints:
+- `sendPredictionReminders` — emails/push notifications before lock, per-user reminder offset, checked across every league a user belongs to
+- `autoLockRound` — every 5 min, locks predictions once the lock time passes (respects an active admin `overrideExpiresAt` window rather than force-relocking it early)
 - `autoOpenRound` — every 10 min, opens the next round's predictions
-- `unsubscribeEmail` (`onRequest`) — one-click unsubscribe link handler
+- `refreshScheduleCache` — every hour, fetches Jolpica (falls back to OpenF1), validates against the hardcoded schedule, caches overrides to `/system/scheduleCache`
+- `unsubscribeEmail` (`onRequest`) — one-click unsubscribe link handler, HMAC-signed token
+- `acceptInvite` (`onCall`) — invite redemption, the only path that can add a member to a group; transactional (concurrent redemptions can't double-count)
+
+### PWA support (Track D)
+- **Offline**: Firestore offline persistence (`persistentLocalCache()` in `shared.js`) plus app-shell precaching (Workbox, via `vite-plugin-pwa`). `useOnlineStatus()` (`shared.js`) drives offline/stale-data UI in `F1League.jsx`, `PredictionView.jsx`, `CalendarView.jsx`, `LeaderboardView.jsx`.
+- **Offline prediction edits are blocked, not queued** — `firestore.rules`' `isRaceOpen()` evaluates lock state at write-arrival, so a write queued offline before lock but delivered after could otherwise be silently rejected. The Save button disables while offline, and `handleSavePredictions` additionally uses `waitForServerAck()` (`shared.js`) to confirm a write actually reached the server — `navigator.onLine` alone doesn't prove Firestore is reachable — before telling the player it saved.
+- **Install**: manifest + icon set (`public/icons/`, dark bg/red-600 accent) generated via `scripts/generate-icons.js`.
+- **Updates**: `registerType: 'prompt'` (not `autoUpdate`) — a new service worker install-and-waits; the app shows a "tap to refresh" banner rather than force-reloading mid-session.
+- See `buildplan.md` for the full spec this implements, including the env-injection ordering fix (`scripts/inject-sw-env.js` must run *after* `vite-plugin-pwa`'s `injectManifest` output, hence the postbuild script + `firebase.json` `predeploy` hook rather than a Vite plugin hook).
 
 ---
 
@@ -140,6 +154,15 @@ firebase deploy --only functions
 npm run build && firebase deploy
 ```
 
+`npm run build` chains `vite build && node scripts/inject-sw-env.js` — the second
+step injects real Firebase config into the built service worker (it must run
+strictly after `vite-plugin-pwa`'s output, not as a Vite plugin hook, or the
+shipped worker ships literal `__VITE_*__` placeholders). `firebase.json` also
+runs that same script as a hosting `predeploy` hook, so even a `firebase
+deploy --only hosting` off a `dist/` built via a bare `vite build` is safe —
+there's no CI on this project enforcing `npm run build` as the only entry
+point.
+
 ---
 
 ## Dev server
@@ -190,8 +213,11 @@ cat > /tmp/spec.md << 'EOF'
 EOF
 
 # Step 2 — run Codex in full-auto mode (non-interactive), model pinned
-codex exec -m gpt-5.6-terra --approval-policy=full-auto "$(cat /tmp/spec.md)"   # default for real work
-codex exec -m gpt-5.6-luna  --approval-policy=full-auto "$(cat /tmp/spec.md)"   # mechanical/repetitive edits
+# NOTE: `--approval-policy=full-auto` was removed from the Codex CLI (confirmed
+# 2026-08-07) — use `--approve-for-me` alone (it already implies workspace-write
+# sandbox; passing --sandbox alongside it errors). See ~/CODEX_MODEL_SOP.md.
+codex exec -m gpt-5.6-terra --approve-for-me "$(cat /tmp/spec.md)"   # default for real work
+codex exec -m gpt-5.6-luna  --approve-for-me "$(cat /tmp/spec.md)"   # mechanical/repetitive edits
 
 # Step 3 — review what changed
 git diff
@@ -224,13 +250,13 @@ After Codex finishes, always:
 
 ---
 
-## Session status as of 2026-08-06 (for a fresh Claude Code session picking this up)
+## Session status as of 2026-08-07 (for a fresh Claude Code session picking this up)
 
-**Everything below is deployed and committed** (`origin/main` @ `db5ab43`,
-which includes the earlier `1b1d7e9`/`0a92d46`/`f615ae1` commits this
-session started by pulling and deploying). Nothing mid-flight — read this
-section, check `git log`, then pick up with the "Next session" list at the
-bottom rather than assuming anything here needs redoing.
+**Everything below is deployed and committed** (`origin/main` @ `9c3fbc7`).
+Nothing mid-flight — read this section (oldest history first, dated
+updates at the bottom are the most recent), check `git log`, then pick up
+with the "Still open" list partway down rather than assuming anything here
+needs redoing.
 
 **Fully complete and deployed:**
 - Track A — lock-time unification (`functions/index.js` matches the
@@ -324,30 +350,14 @@ wrong, not just the lock-gating logic:**
   openai/codex#24135, not something to keep re-debugging) — see the SOP
   file for the full explanation and the reasoning behind that decision.
 
-**Next session — user explicitly asked to continue with these tomorrow:**
-- **Track D** (PWA manifest/icons/offline caching) — deferred, never scoped,
-  but now the named priority for the next session.
+**Still open:**
 - **The migration script** (`security/backups/migrate-schedule-renumber.cjs`)
-  — used once already (see above), user wants to revisit it tomorrow.
-  Decide: keep as a reusable/generalized tool (currently hardcoded to one
-  `groupId` and one specific old→new round map — fine for a single
-  emergency migration, not written to be reused as-is for a future
-  disruption), or archive it now that this migration is done. The backup
-  JSON it was run against is in the same gitignored directory.
-
-**Also still open, lower priority:**
-- **Live browser smoke test never done.** Every fix this session and last
-  was verified via direct API calls, a local Firebase emulator, or Admin
-  SDK reads/writes — not a live pass through the actual deployed app.
-  Specifically worth checking: the calendar/current-round display for
-  round12 (should read Netherlands, not Spain) and the round16 Malaysia
-  entry, since those are the two things a browser pass would catch that
-  nothing else in this session's verification would.
-- **`refreshScheduleCache`'s first live run not yet confirmed.** It's
-  newly deployed on an hourly schedule; worth checking
-  `/system/scheduleCache` in Firestore populates correctly from Jolpica in
-  production (only tested the logic locally against live API responses,
-  not the deployed function itself).
+  — used once already (see above). Decide: keep as a reusable/generalized
+  tool (currently hardcoded to one `groupId` and one specific old→new round
+  map — fine for a single emergency migration, not written to be reused
+  as-is for a future disruption), or archive it now that this migration is
+  done. The backup JSON it was run against is in the same gitignored
+  directory.
 - The driver-performance-graph feature — belongs in a **separate, new
   chat**, not a continuation of this one (see the saved memory note
   `sequencing-rebuild-vs-driver-graph` — build it against the
@@ -362,7 +372,78 @@ wrong, not just the lock-gating logic:**
 
 To reconnect from phone: SSH → `tmux attach -t f1-league` → `claude`
 
-### Update — 2026-08-07: browser MCP confirmed working
+### Update — 2026-08-07: Track D (PWA) built, deployed, and audited
+
+**Track D — PWA support** (manifest, icons, offline caching, install
+support) — see "PWA support" above for what it covers. Spec in
+`buildplan.md`. Validated against the spec's checklist locally (clean
+build, zero placeholder strings in the shipped service worker, FCM logic
+diffed unchanged against pre-move `public/firebase-messaging-sw.js`,
+app-shell fully renders after an offline reload), then deployed and
+re-verified live the same way. All of this session's browser verification
+was against the **unauthenticated shell only** (headless Chromium, driven
+directly via the Playwright npm package rather than the MCP tool — see the
+tooling note below) — sign-in requires an interactive Google OAuth popup,
+so nothing behind login (PredictionView's offline Save-button behavior,
+CalendarView/LeaderboardView's stale-data banners, the round12/round16
+display, `refreshScheduleCache`'s `/system/scheduleCache` doc) was
+re-verified live this session, beyond a direct code read. Those were
+flagged open in the prior status update and are still open.
+
+**Post-Track-D full system audit** — ran an independent audit pass with
+both Codex (`gpt-5.6-terra`) and Claude (forked instance) over the whole
+repo, per the multi-agent workflow above, then reconciled and verified
+every finding against the actual code before fixing. Both independently
+converged on the same offline-write trust gap; Codex additionally surfaced
+several pre-existing bugs unrelated to Track D. All 11 confirmed findings
+fixed and deployed:
+- `autoLockRound` now respects an admin's `overrideExpiresAt` — it used to
+  ignore it entirely, so the documented 15-minute unlock window actually
+  lasted 0-5 minutes (the next cron tick force-relocked immediately, since
+  an admin can only unlock *after* the base lock time has passed).
+- Offline write-guard: `navigator.onLine` alone doesn't prove Firestore is
+  reachable, and `persistentLocalCache()` lets `setDoc()` resolve from the
+  local queue before any server round-trip — `waitForServerAck()`
+  (`shared.js`) now confirms the write actually reached the server before
+  `PredictionView.jsx` tells the player it saved.
+- `acceptInvite` race condition (concurrent redemptions could double-count
+  `usedCount`) — fixed via a Firestore transaction.
+- `AdminWizard.jsx`'s league-creation write ordering — fixed to match
+  `F1League.jsx`'s own (already-fixed) path, so a dropped write can't
+  permanently block a brand-new league.
+- `firebase.json` hosting `predeploy` hook — guarantees the SW env
+  injection can't be skipped regardless of how `dist/` was built.
+- `sendPredictionReminders` now checks completion across every group a
+  user belongs to, not just the first.
+- Dead `?join={groupId}` legacy flow removed (rules already rejected it).
+- Reminder copy fixed ("FP2" → "Qualifying" for non-sprint weekends).
+- `firestore.rules` dropped a stale `round24` allowlist entry.
+- `CalendarView`/`LeaderboardView` offline-indicator UX gaps closed.
+
+Deployed: functions, rules, hosting. Post-repair Firestore integrity check
+clean, counts unchanged (all fixes were logic-only). Pushed to
+`origin/main`.
+
+**Still open from this pass:**
+- **Real-device PWA test** — "Add to Home Screen" and a real FCM push
+  notification can't be verified from this VPS; needs a phone. (Push can be
+  tested on-demand via Firebase Console → Cloud Messaging → "Send test
+  message" using the FCM token from a signed-in user's `users/{uid}` doc,
+  rather than waiting for a real race-weekend reminder window.)
+- **Live authenticated-flow smoke test still not done** — same gap the
+  2026-08-06 status update flagged (round12/round16 calendar display,
+  `refreshScheduleCache`'s cache doc) plus the new Track D authenticated
+  UI (offline Save-button behavior, stale-data banners). Needs a real
+  Google sign-in, which can't be scripted headlessly here.
+- Two environment/tooling issues hit and fixed this session, documented in
+  `~/CODEX_MODEL_SOP.md`: the Codex CLI dropped `--approval-policy=full-auto`
+  in favor of `--approve-for-me`, and the Playwright MCP server defaults to
+  a `chrome` channel that was never installed on this VPS (fixed via
+  `--executable-path` pointing at the Chromium build already on disk) —
+  applied to the Claude Code registration only; the two Codex `CODEX_HOME`
+  registrations likely have the same gap, unverified.
+
+### Update — 2026-08-07 (earlier): browser MCP confirmed working
 Playwright MCP verified end-to-end through the real tool chain (not just a
 bypass script) — navigation, console reading, screenshots all working for
 both Claude Code and Codex (Codex needs interactive mode, see SOP). Version
