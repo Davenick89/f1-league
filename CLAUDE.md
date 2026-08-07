@@ -22,7 +22,7 @@ A React single-page app for running an F1 predictions league among friends. Play
 ## Key files
 | File | Purpose |
 |---|---|
-| `F1League.jsx` | Root shell — ~1140 lines. Auth, routing between views, global state. Lazy-loads the 9 view files below (see structure below) |
+| `F1League.jsx` | Root shell — ~1140 lines. Auth, routing between views, global state. Lazy-loads the 10 view files below (see structure below) |
 | `shared.js` | Firebase init, `F1_SCHEDULE_2026`, lock-time helpers, `useF1ApiSchedule`, `useOnlineStatus`, `saveRoundScores`, `waitForServerAck` |
 | `scoring.js` | Canonical scoring engine — `scoreRace()`, `rfDistance()`, `rfPoints()` |
 | `firestore.rules` | Security rules — all auth/lock logic lives here |
@@ -32,7 +32,9 @@ A React single-page app for running an F1 predictions league among friends. Play
 | `sw-src/firebase-messaging-sw.js` | Service worker source — merged FCM push handling + Workbox app-shell precaching (built to `dist/firebase-messaging-sw.js`) |
 | `scripts/inject-sw-env.js` | Postbuild script — injects Firebase env vars into the built service worker (also runs as a `firebase.json` hosting `predeploy` hook, so it can't be skipped) |
 | `scripts/generate-icons.js` | One-off script (sharp) — rasterizes `public/icons/icon.svg` into the PWA icon set |
+| `StatsView.jsx` | Lazy-loaded Driver/Team Performance Stats view — points progression, qual-vs-race delta, wins/podiums/DNFs, head-to-head, track history. See "Driver/Team Performance Stats" below |
 | `buildplan.md` | Spec doc for the Track D (PWA) build — implemented, kept for reference |
+| `buildplan-stats.md` | Spec doc for the Driver/Team Performance Stats (v1) build — implemented, kept for reference |
 | `.claude/launch.json` | Dev server configs for Claude Code browser preview |
 | `security/INCIDENT_RESPONSE.md` | Rollback procedures, deploy-phase checklists, backup/restore commands |
 | `security/backup.sh`, `security/integrity-check.cjs` | Firestore backup and document-count integrity check |
@@ -41,8 +43,8 @@ A React single-page app for running an F1 predictions league among friends. Play
 There is no test suite (no test runner configured in `package.json` or `functions/package.json`).
 
 ### F1League.jsx structure
-Code-split (Track C) — no router, view switching is done via local state, and 9 views are `React.lazy`-loaded from their own files. Top-level pieces:
-`LandingPage` → `SetNicknameModal` → `F1League` (root component, holds most state/handlers) → lazy: `AdminWizard.jsx` (league creation) → `LeaderboardView.jsx` (+ `UserStatsCard` / `PlayerSummaryModal`) → `PredictionView.jsx` (the per-race prediction form) → `SeasonBoardView.jsx` → `HowToPlayView.jsx` → `ResultsView.jsx` (admin result entry + scoring trigger) → `InvitesView.jsx` (+ `LeagueSettingsCard`) → `CalendarView.jsx` → `AuditView.jsx`. Shared helpers (Firebase init, schedule data, lock-time math, hooks) live in `shared.js`, imported by all of the above.
+Code-split (Track C) — no router, view switching is done via local state, and 10 views are `React.lazy`-loaded from their own files. Top-level pieces:
+`LandingPage` → `SetNicknameModal` → `F1League` (root component, holds most state/handlers) → lazy: `AdminWizard.jsx` (league creation) → `LeaderboardView.jsx` (+ `UserStatsCard` / `PlayerSummaryModal`) → `PredictionView.jsx` (the per-race prediction form) → `SeasonBoardView.jsx` → `HowToPlayView.jsx` → `ResultsView.jsx` (admin result entry + scoring trigger) → `StatsView.jsx` (Driver/Team Performance Stats — global, not group-scoped) → `InvitesView.jsx` (+ `LeagueSettingsCard`) → `CalendarView.jsx` → `AuditView.jsx`. Shared helpers (Firebase init, schedule data, lock-time math, hooks) live in `shared.js`, imported by all of the above.
 
 Race schedule/session times come from the public **Jolpica Ergast API** (`https://api.jolpi.ca/ergast/f1/{season}.json`), fetched client-side, with an hourly Cloud Function (`refreshScheduleCache`) caching validated overrides to `/system/scheduleCache` (OpenF1 as a backup source if Jolpica is unreachable) — see `F1_SCHEDULE_2026` in `shared.js`/`functions/index.js` for the hardcoded fallback.
 
@@ -51,11 +53,13 @@ Push notifications use Firebase Cloud Messaging (`getMessaging`), via a service 
 Scoring is computed **client-side**, not in a Cloud Function: when an admin enters/edits results in `ResultsView` (`handleSaveResults`), it calls `scoreRace()` / `rfDistance()` / `rfPoints()` from `scoring.js` directly and writes the result to `/groups/{groupId}/scores/{userId}`.
 
 ### Cloud Functions (`functions/index.js`)
-All are scheduled (`onSchedule`) except the two callable/request endpoints:
+All are scheduled (`onSchedule`) except the callable/request endpoints:
 - `sendPredictionReminders` — emails/push notifications before lock, per-user reminder offset, checked across every league a user belongs to
 - `autoLockRound` — every 5 min, locks predictions once the lock time passes (respects an active admin `overrideExpiresAt` window rather than force-relocking it early)
 - `autoOpenRound` — every 10 min, opens the next round's predictions
 - `refreshScheduleCache` — every hour, fetches Jolpica (falls back to OpenF1), validates against the hardcoded schedule, caches overrides to `/system/scheduleCache`
+- `refreshDriverStatsCache` — every hour, incrementally backfills `/driverStats/{series}` from Jolpica (capped at 5 rounds/run — see "Driver/Team Performance Stats" below)
+- `getDriverCircuitHistory` (`onCall`) — lazy, cached driver×circuit all-time lookup for Track History
 - `unsubscribeEmail` (`onRequest`) — one-click unsubscribe link handler, HMAC-signed token
 - `acceptInvite` (`onCall`) — invite redemption, the only path that can add a member to a group; transactional (concurrent redemptions can't double-count)
 
@@ -63,8 +67,16 @@ All are scheduled (`onSchedule`) except the two callable/request endpoints:
 - **Offline**: Firestore offline persistence (`persistentLocalCache()` in `shared.js`) plus app-shell precaching (Workbox, via `vite-plugin-pwa`). `useOnlineStatus()` (`shared.js`) drives offline/stale-data UI in `F1League.jsx`, `PredictionView.jsx`, `CalendarView.jsx`, `LeaderboardView.jsx`.
 - **Offline prediction edits are blocked, not queued** — `firestore.rules`' `isRaceOpen()` evaluates lock state at write-arrival, so a write queued offline before lock but delivered after could otherwise be silently rejected. The Save button disables while offline, and `handleSavePredictions` additionally uses `waitForServerAck()` (`shared.js`) to confirm a write actually reached the server — `navigator.onLine` alone doesn't prove Firestore is reachable — before telling the player it saved.
 - **Install**: manifest + icon set (`public/icons/`, dark bg/red-600 accent) generated via `scripts/generate-icons.js`.
-- **Updates**: `registerType: 'prompt'` (not `autoUpdate`) — a new service worker install-and-waits; the app shows a "tap to refresh" banner rather than force-reloading mid-session.
+- **Updates**: `registerType: 'prompt'` (not `autoUpdate`) — a new service worker install-and-waits; the app shows a "tap to refresh" banner rather than force-reloading mid-session. `sw-src/firebase-messaging-sw.js` has an explicit `message` listener for `SKIP_WAITING` — `vite-plugin-pwa`'s `injectManifest` strategy (unlike `generateSW`) does **not** auto-inject one, so without it `updateSW(true)` posts a message nobody's listening for and the "tap to refresh" banner silently does nothing.
 - See `buildplan.md` for the full spec this implements, including the env-injection ordering fix (`scripts/inject-sw-env.js` must run *after* `vite-plugin-pwa`'s `injectManifest` output, hence the postbuild script + `firebase.json` `predeploy` hook rather than a Vite plugin hook).
+
+### Driver/Team Performance Stats (Stats v1)
+Global season stats (not scoped to any league) — points progression, qual-vs-race delta, wins/podiums/DNFs, head-to-head, track history. Spec in `buildplan-stats.md`; view is `StatsView.jsx`, nav entry between Results and Invite.
+- **Data model**: `/driverStats/{series}` (`series` is always `"f1"` today — namespaced from the start for a possible future multi-series v4) holds `{ season, lastCachedRound, rounds: [...] }`, one entry per cached round with that round's classified results + `driverStandings`/`constructorStandings` snapshots. `refreshDriverStatsCache` backfills it incrementally, capped at 5 new rounds per hourly run (a first-ever/fallen-behind run can have a double-digit backlog — fetching it all in one burst hit a live Jolpica 429 once).
+- **DNS vs DNF**: Jolpica's non-numeric `positionText` codes are `R`/`D` (Retired/Disqualified — a real DNF) and `W` (Did Not Start/Withdrew — **not** a DNF, a distinct category this codebase's own `scoring.js` already respects elsewhere). `classifyPosition()` in `functions/index.js` splits these into separate `dnf`/`dns` flags; don't reintroduce a single combined flag.
+- **Team colors**: `TEAM_COLORS` in `StatsView.jsx`, keyed by Jolpica's `constructorId`. Teammates intentionally share their team's color — the toggle buttons/legend disambiguate by name.
+- **Track history**: `getDriverCircuitHistory` lazily caches to `/driverStats/{series}/circuits/{driverId}::{circuitId}` on first request per pair (cached indefinitely — no TTL). The `::` delimiter matters: driver/circuit IDs already contain underscores (`max_verstappen`, `red_bull_ring`), so a plain `_` join lets two different pairs collide on the same cache doc; `::` can't appear in either ID (both are regex-validated to `[a-z0-9_]+`). Only non-empty Jolpica responses get cached — an empty result is returned but not persisted, so a transient upstream hiccup can't permanently poison a pair that genuinely has history. The circuit picker itself is scoped to the *current season's* calendar (fetched from the season-schedule endpoint, independent of the cache's backfill state) — deliberately not Jolpica's full ~78-circuit all-time list, which was tried first and was overkill for a fan-facing picker.
+- **Driver/constructor ordering**: sorted by position in the latest cached round's official standings (leaders first), not alphabetically — same array feeds the points-progression toggle list and every dropdown in the view.
 
 ---
 
@@ -80,6 +92,9 @@ All are scheduled (`onSchedule`) except the two callable/request endpoints:
 /groups/{groupId}/auditLog/{logId}     — prediction_submit / prediction_edit / admin_unlock
 /groups/{groupId}/systemLogs/{logId}   — admin operation logs
 /invites/{code}                        — invite links
+/driverStats/{series}                  — cached season stats ("f1" today), see Stats section above
+/driverStats/{series}/circuits/{pairId} — lazy driver×circuit history cache, pairId = "{driverId}::{circuitId}"
+/system/scheduleCache                  — validated Jolpica/OpenF1 schedule overrides
 ```
 
 ---
@@ -253,11 +268,12 @@ After Codex finishes, always:
 
 ## Session status as of 2026-08-07 (for a fresh Claude Code session picking this up)
 
-**Everything below is deployed and committed** (`origin/main` @ `9c3fbc7`).
+**Everything below is deployed and committed** (`origin/main` @ `51c16fd`).
 Nothing mid-flight — read this section (oldest history first, dated
-updates at the bottom are the most recent), check `git log`, then pick up
-with the "Still open" list partway down rather than assuming anything here
-needs redoing.
+updates at the bottom are the most recent — **read those last, they
+supersede anything earlier that they touch**), check `git log`, then pick
+up with whatever's still flagged open in the latest dated update rather
+than assuming anything here needs redoing.
 
 **Fully complete and deployed:**
 - Track A — lock-time unification (`functions/index.js` matches the
@@ -359,11 +375,11 @@ wrong, not just the lock-gating logic:**
   as-is for a future disruption), or archive it now that this migration is
   done. The backup JSON it was run against is in the same gitignored
   directory.
-- The driver-performance-graph feature — belongs in a **separate, new
-  chat**, not a continuation of this one (see the saved memory note
-  `sequencing-rebuild-vs-driver-graph` — build it against the
-  now-modularized structure, following the `React.lazy` pattern
-  established by Track C).
+- ~~The driver-performance-graph feature — belongs in a separate, new
+  chat~~ — superseded: it shipped in *this* session anyway (as "Driver/Team
+  Performance Stats v1" — see the dated update at the bottom and the
+  section above). The memory note `sequencing-rebuild-vs-driver-graph`
+  this pointed to is stale for that reason and should be updated/retired.
 - The performance/scale question ("at how many leagues/users would this
   slow down") was answered architecturally, not benchmarked: Firestore
   scales with per-league member count, not total leagues/users; Track C
@@ -455,3 +471,98 @@ upgrade procedure. Also confirmed via a clean browser console check: the
 `F1_SCHEDULE_2026` drift issue flagged in the previous status update
 appears already resolved (0 console errors on a fresh page load, vs 20
 schedule-sync errors seen before).
+
+### Update — 2026-08-07 (latest): Driver/Team Performance Stats v1 shipped, live-patched, and fully audited
+
+**The "separate new chat" plan for the driver-performance-graph feature
+didn't happen** — a concurrent session pushed `buildplan-stats.md` mid-way
+through this one (while Track D was still in flight; its own spec
+explicitly said not to run alongside Track D's Codex build, and by the
+time it was picked up, Track D was done, so that condition was already
+satisfied). Built here instead. See "Driver/Team Performance Stats" above
+for the shipped shape of the feature.
+
+**Build + validation** (Codex `gpt-5.6-terra` implemented the spec, Claude
+validated before deploy — same pattern as Track D): validation caught a
+structurally invalid Firestore path in the spec itself (`/system/
+driverStats/{series}` is a 3-segment/odd path, which Firestore resolves to
+a *collection*, not a document — every scheduled cache run would have
+failed silently forever, exactly the kind of thing a build/rules-compile
+check can't catch, only an actual live write can), a wrong DNS/DNF
+classification assumption (confirmed live against ~66 real races before
+Codex even ran), a head-to-head picker wrongly restricted to teammates
+only, and a rate-limit hazard on first backfill (reproduced live: 11
+backlogged rounds fetched in one burst hit a 429).
+
+**Four rounds of live user-feedback fixes** after checking the deployed
+page (all in `StatsView.jsx` unless noted): real team colors replacing an
+arbitrary palette; a Select All/Clear control, which surfaced and fixed a
+real pre-existing bug (an effect that auto-picked the first 4 entries was
+keyed off the selection's length, so clearing it immediately re-triggered
+the same effect and refilled it — Clear could never actually clear);
+track history's circuit picker changed data source twice (first to
+Jolpica's full ~78-circuit all-time list, then scoped down to just the
+current season's calendar per explicit user feedback that the all-time
+list was overkill); driver/constructor ordering changed from alphabetical
+to current-championship-standings; all 5 sections made individually
+collapsible; countries added next to circuit names; and a real,
+independently-confirmed bug in `sw-src/firebase-messaging-sw.js` — the
+"tap to refresh" PWA update banner did nothing when clicked because
+`vite-plugin-pwa`'s `injectManifest` strategy never auto-adds the
+`SKIP_WAITING` message listener `updateSW(true)` depends on (see "PWA
+support" above). That fix's *end-to-end* click-through (banner appears,
+click reloads) wasn't fully verified live — repeated attempts to simulate
+a multi-deploy update cycle in one headless session hit inconsistent
+service-worker timing artifacts; the missing-listener root cause itself
+is certain (read straight from source), the full flow needs a real check
+across an ordinary future deploy.
+
+**Round-3 full system audit** (same Codex+Claude dual-audit pattern as
+Track D's, scoped to everything since the last one — the whole Stats
+feature plus all four live-patch rounds): both audits independently
+converged on the same headline bug — `getDriverCircuitHistory`'s cache
+document ID joined `driverId`/`circuitId` with a plain `_`, and since both
+ID types already contain underscores and the function only validates
+*format* (not a real-name allowlist), two different pairs could be chosen
+to concatenate to the identical doc ID, silently serving one pair's cached
+history for an unrelated request — confirmed concretely constructible, not
+just theoretical. Fixed with a `::` delimiter the ID format can never
+produce, plus a defense-in-depth check that a cache hit's stored IDs
+actually match the request. Also fixed: a transient empty Jolpica response
+could get cached as permanent "0 starts" truth (now only non-empty results
+persist); `refreshDriverStatsCache` could freeze forever on a genuine
+permanent data gap with zero diagnostic signal (now logs loudly past a
+3-day-overdue threshold, without auto-skipping); track history's result
+staying visible after changing the driver/circuit selection; and the
+circuit-list fetch not handling non-2xx responses or clearing its error on
+retry. Deliberately deferred as lower-priority (documented, not
+forgotten): a minor sort-tiebreak edge case for entries missing from the
+latest standings (degrades gracefully, doesn't break), and stale dropdown
+selections across a season rollover (many months away).
+
+**New reusable tooling**: `security/e2e-test-signin.cjs` — real Google
+OAuth can't be scripted headlessly, so this mints a Firebase custom auth
+token (via the Admin SDK) for a dedicated, isolated test account +
+throwaway league, letting Playwright drive genuinely authenticated
+in-app flows against production. Closed a gap flagged since Track D
+(authenticated UI was previously validated by code-reading only) — used
+throughout this update to verify StatsView renders correctly, not just
+that its code looks right. Two non-obvious mechanics documented in the
+script's own header: the sign-in must use no `initializeApp()` name arg
+(must be `'[DEFAULT]'` to share the app's own persistence key — a custom
+name silently signs in an session the app never sees), and the post-signin
+reload must wait on `'load'` not `'networkidle'` (an authenticated
+session's persistent Firestore listeners never go network-idle).
+
+**Deployed**: functions, hosting (rules unchanged this round). Firestore
+integrity check clean throughout. Pushed to `origin/main` @ `51c16fd`.
+
+**Still open:**
+- The real-device PWA test (Add to Home Screen, real FCM push) and the
+  tap-to-refresh end-to-end click-through — both still need a check on an
+  actual phone/browser session, not this VPS.
+- The migration script decision (`security/backups/migrate-schedule-renumber.cjs`)
+  — still undecided, unchanged from earlier status updates.
+- Memory note `sequencing-rebuild-vs-driver-graph` is now stale (said the
+  driver-graph feature needed a separate chat; it shipped in this one) and
+  should be updated or retired next time it's touched.
