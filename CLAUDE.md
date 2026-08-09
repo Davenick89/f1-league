@@ -33,8 +33,11 @@ A React single-page app for running an F1 predictions league among friends. Play
 | `scripts/inject-sw-env.js` | Postbuild script — injects Firebase env vars into the built service worker (also runs as a `firebase.json` hosting `predeploy` hook, so it can't be skipped) |
 | `scripts/generate-icons.js` | One-off script (sharp) — rasterizes `public/icons/icon.svg` into the PWA icon set |
 | `StatsView.jsx` | Lazy-loaded Driver/Team Performance Stats view — points progression, qual-vs-race delta, wins/podiums/DNFs, head-to-head, track history. See "Driver/Team Performance Stats" below |
+| `NewsView.jsx` | Lazy-loaded RSS News Tab view — season filter, relevance-ranked feed, per-source filter, Formula1.com link-out card. See "RSS News Tab" below |
 | `buildplan.md` | Spec doc for the Track D (PWA) build — implemented, kept for reference |
 | `buildplan-stats.md` | Spec doc for the Driver/Team Performance Stats (v1) build — implemented, kept for reference |
+| `buildplan-news.md` | Spec doc for the RSS News Tab (v2) build — implemented, kept for reference |
+| `buildplan-news-ai.md` | Spec doc for the AI-summarized digest (v3) — **not built, explicitly gated** until v2 has been live and stable for a while. Do not build from this without re-confirming that gate still holds |
 | `.claude/launch.json` | Dev server configs for Claude Code browser preview |
 | `security/INCIDENT_RESPONSE.md` | Rollback procedures, deploy-phase checklists, backup/restore commands |
 | `security/backup.sh`, `security/integrity-check.cjs` | Firestore backup and document-count integrity check |
@@ -43,8 +46,8 @@ A React single-page app for running an F1 predictions league among friends. Play
 There is no test suite (no test runner configured in `package.json` or `functions/package.json`).
 
 ### F1League.jsx structure
-Code-split (Track C) — no router, view switching is done via local state, and 10 views are `React.lazy`-loaded from their own files. Top-level pieces:
-`LandingPage` → `SetNicknameModal` → `F1League` (root component, holds most state/handlers) → lazy: `AdminWizard.jsx` (league creation) → `LeaderboardView.jsx` (+ `UserStatsCard` / `PlayerSummaryModal`) → `PredictionView.jsx` (the per-race prediction form) → `SeasonBoardView.jsx` → `HowToPlayView.jsx` → `ResultsView.jsx` (admin result entry + scoring trigger) → `StatsView.jsx` (Driver/Team Performance Stats — global, not group-scoped) → `InvitesView.jsx` (+ `LeagueSettingsCard`) → `CalendarView.jsx` → `AuditView.jsx`. Shared helpers (Firebase init, schedule data, lock-time math, hooks) live in `shared.js`, imported by all of the above.
+Code-split (Track C) — no router, view switching is done via local state, and 11 views are `React.lazy`-loaded from their own files. Top-level pieces:
+`LandingPage` → `SetNicknameModal` → `F1League` (root component, holds most state/handlers) → lazy: `AdminWizard.jsx` (league creation) → `LeaderboardView.jsx` (+ `UserStatsCard` / `PlayerSummaryModal`) → `PredictionView.jsx` (the per-race prediction form) → `SeasonBoardView.jsx` → `HowToPlayView.jsx` → `ResultsView.jsx` (admin result entry + scoring trigger) → `StatsView.jsx` (Driver/Team Performance Stats — global, not group-scoped) → `NewsView.jsx` (RSS News Tab — global, not group-scoped) → `InvitesView.jsx` (+ `LeagueSettingsCard`) → `CalendarView.jsx` → `AuditView.jsx`. Shared helpers (Firebase init, schedule data, lock-time math, hooks) live in `shared.js`, imported by all of the above.
 
 Race schedule/session times come from the public **Jolpica Ergast API** (`https://api.jolpi.ca/ergast/f1/{season}.json`), fetched client-side, with an hourly Cloud Function (`refreshScheduleCache`) caching validated overrides to `/system/scheduleCache` (OpenF1 as a backup source if Jolpica is unreachable) — see `F1_SCHEDULE_2026` in `shared.js`/`functions/index.js` for the hardcoded fallback.
 
@@ -60,6 +63,7 @@ All are scheduled (`onSchedule`) except the callable/request endpoints:
 - `refreshScheduleCache` — every hour, fetches Jolpica (falls back to OpenF1), validates against the hardcoded schedule, caches overrides to `/system/scheduleCache`
 - `refreshDriverStatsCache` — every hour, incrementally backfills `/driverStats/{series}` from Jolpica (capped at 5 rounds/run — see "Driver/Team Performance Stats" below)
 - `getDriverCircuitHistory` (`onCall`) — lazy, cached driver×circuit all-time lookup for Track History
+- `refreshNewsCache` — every 30 min, refreshes one Firestore doc per RSS source independently (`Promise.allSettled` — one publisher outage never blocks the others) — see "RSS News Tab" below
 - `unsubscribeEmail` (`onRequest`) — one-click unsubscribe link handler, HMAC-signed token
 - `acceptInvite` (`onCall`) — invite redemption, the only path that can add a member to a group; transactional (concurrent redemptions can't double-count)
 
@@ -78,6 +82,15 @@ Global season stats (not scoped to any league) — points progression, qual-vs-r
 - **Track history**: `getDriverCircuitHistory` lazily caches to `/driverStats/{series}/circuits/{driverId}::{circuitId}` on first request per pair (cached indefinitely — no TTL). The `::` delimiter matters: driver/circuit IDs already contain underscores (`max_verstappen`, `red_bull_ring`), so a plain `_` join lets two different pairs collide on the same cache doc; `::` can't appear in either ID (both are regex-validated to `[a-z0-9_]+`). Only non-empty Jolpica responses get cached — an empty result is returned but not persisted, so a transient upstream hiccup can't permanently poison a pair that genuinely has history. The circuit picker itself is scoped to the *current season's* calendar (fetched from the season-schedule endpoint, independent of the cache's backfill state) — deliberately not Jolpica's full ~78-circuit all-time list, which was tried first and was overkill for a fan-facing picker.
 - **Driver/constructor ordering**: sorted by position in the latest cached round's official standings (leaders first), not alphabetically — same array feeds the points-progression toggle list and every dropdown in the view.
 
+### RSS News Tab (v2)
+Global (not scoped to any league) — curated headlines + ≤200-char excerpts + source attribution + link-out, no full-text scraping, no AI. Spec in `buildplan-news.md`; view is `NewsView.jsx`, nav entry between Stats and Invite.
+- **Data model**: one Firestore doc per source, `/news/{sourceId}` (`{ sourceName, sourceUrl, items: [...], fetchedAt, pollIntervalMinutes }`, ≤20 items each). `refreshNewsCache` fetches every source independently via `Promise.allSettled` — one publisher's outage or a malformed feed never blocks the others' refresh, and a source is only overwritten if that fetch+parse returned at least one item (a transient empty/failed response never overwrites a good cache, same principle as `getDriverCircuitHistory`'s fix above). Respects each feed's own `<ttl>` if present, minimum 30 min otherwise.
+- **8 live sources**: Autosport, BBC Sport, F1Technical, GrandPrix.com, The Guardian, Motorsport.com, RaceFans, The Race — all live-verified (both feed validity *and* that the content is actually F1-relevant, not just parseable RSS).
+- **Formula1.com is deliberately excluded from `NEWS_SOURCES` — do not add it.** Their own "RSS FEED TERMS OF USE" page explicitly prohibits this feature's exact pattern ("you may not publish a webpage that simply aggregates the RSS feeds of a specific type of content on the Site") — verified directly against their legal page, not assumed. No official embed/widget/API program exists either. Represented instead by `OfficialSourceCard` in `NewsView.jsx`: a static link-out to formula1.com that touches zero RSS content, so the restriction (which only covers their RSS feed) doesn't apply to it. User explicitly confirmed (2026-08-09) they're fine holding this as link-only; see the `driver-stats-v2-v3-roadmap` memory note for the fuller record, including the X/Twitter-embed alternative that was considered and declined.
+- **ESPN excluded** — no working feed found under any URL pattern tried (403s, empty responses).
+- **Sky Sports excluded** — a real, live-caught bug: their feed URL parses as valid RSS with real items, but it's Sky's general all-sports feed, not F1-specific (no dedicated F1 feed exists under any pattern tried). Filled the News tab with boxing/tennis/football before this was caught by actually reading the rendered content, not just checking that the feed parsed. If re-adding any source in the future, verify topical relevance live, not just feed validity.
+- **Season + relevance filtering**: items are bucketed by `pubDate`'s calendar year into a season dropdown (defaulting to the current season, derived from `F1_SCHEDULE_2026`'s own year — the RSS cache has no other concept of "season"). Within the selected season, a "Most relevant" section shows everything published since the last completed race (via `getCurrentRound()`/`F1_SCHEDULE_2026`) — this single date window covers both post-race reaction and next-race build-up/penalties/rule news without fragile per-article keyword classification. Only the 15 most recent relevant items render by default (`MOST_RELEVANT_PREVIEW_COUNT`) with a "Show all" expander — the date window alone wasn't short enough (8 active sources over a ~2-week race gap is 100+ items). Everything older than the last race is collapsed behind its own "Show N earlier articles" toggle.
+
 ---
 
 ## Firestore collections
@@ -94,6 +107,7 @@ Global season stats (not scoped to any league) — points progression, qual-vs-r
 /invites/{code}                        — invite links
 /driverStats/{series}                  — cached season stats ("f1" today), see Stats section above
 /driverStats/{series}/circuits/{pairId} — lazy driver×circuit history cache, pairId = "{driverId}::{circuitId}"
+/news/{sourceId}                       — cached RSS items per publisher (8 sources), see RSS News Tab section above
 /system/scheduleCache                  — validated Jolpica/OpenF1 schedule overrides
 ```
 
@@ -268,7 +282,7 @@ After Codex finishes, always:
 
 ## Session status as of 2026-08-07 (for a fresh Claude Code session picking this up)
 
-**Everything below is deployed and committed** (`origin/main` @ `51c16fd`).
+**Everything below is deployed and committed** (`origin/main` @ `9fd283e`).
 Nothing mid-flight — read this section (oldest history first, dated
 updates at the bottom are the most recent — **read those last, they
 supersede anything earlier that they touch**), check `git log`, then pick
@@ -567,13 +581,49 @@ integrity check clean throughout. Pushed to `origin/main` @ `51c16fd`.
   driver-graph feature needed a separate chat; it shipped in this one) and
   should be updated or retired next time it's touched.
 
-### Roadmap: v2-v4 (news, AI digest, multi-motorsport)
+### Update — 2026-08-09: RSS News Tab (v2) shipped, live-patched, Formula1.com resolved
 
-Agreed alongside v1 (the driver/team stats feature above), same 4-phase
-structure:
-- **v2 — RSS news tab.** Spec in `buildplan-news.md`. Curated headlines +
-  excerpts + link-out from up to 12 candidate sources, no full-text
-  scraping, no AI. Ready to build.
+**v2 is shipped** — see "RSS News Tab" above for the full shipped shape.
+Spec in `buildplan-news.md`. Same Codex-builds/Claude-validates pattern as
+v1: Codex's own sandbox had no outbound access to verify any of the
+spec's candidate sources, so this session independently verified all of
+them live *before* running Codex (10 of 11 actually-named sources —
+the spec's header said "12" but only ever listed 11, a spec inconsistency
+worth having caught) so Codex's shipped list could be cross-checked
+against real ground truth rather than trusted blindly (Codex's sandbox
+also had DNS resolution failures for several hosts during its own build).
+
+**Two real bugs found post-Codex, one of them only visible by actually
+reading rendered content, not by checking that a feed parses:**
+- Formula1.com has a working feed but a real, verified ToS restriction —
+  see "RSS News Tab" above, this is a permanent exclusion, not a bug to
+  eventually fix.
+- Sky Sports' feed URL returned valid, parseable RSS — passed both the
+  pre-verification pass *and* Codex's own check — but its content turned
+  out to be Sky's general all-sports feed (boxing, tennis, football),
+  not F1-specific. Only caught by live-rendering the page and reading the
+  actual headlines. **Lesson for any future source additions: verify
+  topical relevance live, not just that the feed parses.**
+
+**Two rounds of live user-feedback fixes** after checking the deployed
+page: (1) Formula1.com was added as a link-only `OfficialSourceCard`
+after the user asked for it to be "connected" — the RSS route stays
+closed (see above), the user explicitly confirmed holding it as link-only
+is fine for now; (2) the page was too long with too much old content
+mixed in indiscriminately — added a season filter (bucketed by `pubDate`
+year, no other season concept exists in RSS data) and a relevance-ranked
+"Most relevant" section (since the last completed race, via the existing
+`getCurrentRound()`/`F1_SCHEDULE_2026` — no fragile keyword
+classification needed). First pass at the relevance window alone wasn't
+actually shorter (8 sources over a 2-week race gap is 100+ items); added
+a 15-item preview cap with a "Show all" expander on top of the date
+window to actually solve the original "too long" complaint.
+
+**Deployed**: functions, rules (once, for the initial `/news/{sourceId}`
+rules block), hosting (several more times for the pure-frontend
+follow-ups). Firestore integrity check clean throughout.
+
+**Still open / roadmap for v3-v4:**
 - **v3 — AI-summarized digest.** Spec in `buildplan-news-ai.md`, layered on
   v2's feed pipeline. **Explicitly gated** — the app's owner said this can
   wait until v2 has been live and stable for a while. Don't build this
@@ -585,4 +635,6 @@ structure:
   that's feasible for it? The data-namespacing groundwork (`driverStats/
   {series}`) is already in place from v1, so no architecture rework is
   needed once a series' data situation is actually known — the missing
-  piece is the research itself, not the code.
+  piece is the research itself, not the code. The user has also said
+  proper Formula1.com integration (beyond the link-only card) might
+  belong in this phase — see the `driver-stats-v2-v3-roadmap` memory note.
