@@ -5,7 +5,7 @@ import { httpsCallable } from 'firebase/functions';
 import { getToken } from 'firebase/messaging';
 import { registerSW } from 'virtual:pwa-register';
 import { validateNickname, validateGroupName, validateInviteCode } from './validation.js';
-import { LogOut, Plus, Users, Trophy, BarChart3, Settings, Calendar } from 'lucide-react';
+import { LogOut, Plus, Users, Trophy, BarChart3, Settings, Calendar, Newspaper } from 'lucide-react';
 import {
   auth, db, functions, VAPID_KEY, track, fcmSupported, getMessagingInstance,
   F1_SCHEDULE_2026, getCurrentRound, getTimeUntilLock, getValidatedApiSessionStr,
@@ -22,6 +22,7 @@ const InvitesView = React.lazy(() => import('./InvitesView.jsx'));
 const CalendarView = React.lazy(() => import('./CalendarView.jsx'));
 const AuditView = React.lazy(() => import('./AuditView.jsx'));
 const StatsView = React.lazy(() => import('./StatsView.jsx'));
+const NewsView = React.lazy(() => import('./NewsView.jsx'));
 
 function GroupStandingBadge({ groupId, userId }) {
   const [standing, setStanding] = React.useState(null);
@@ -793,6 +794,7 @@ export default function F1League() {
                 { view: "calendar",    icon: <Calendar size={16} />, label: "Calendar" },
                 { view: "results",     icon: <span className="text-sm">📊</span>, label: "Results" },
                 { view: "stats",       icon: <BarChart3 size={16} />, label: "Stats" },
+                { view: "news",        icon: <Newspaper size={16} />, label: "News" },
                 { view: "invites",     icon: <Users size={16} />, label: "Invite" },
               ].map(({ view, icon, label }) => (
                 <button
@@ -835,6 +837,7 @@ export default function F1League() {
             {currentView === "howToPlay" && <HowToPlayView />}
             {currentView === "results" && <ResultsView group={selectedGroup} user={user} currentRound={currentRound} />}
             {currentView === "stats" && <StatsView series="f1" />}
+            {currentView === "news" && <NewsView />}
             {currentView === "invites" && <InvitesView group={selectedGroup} user={user} generateInviteCode={generateInviteCode} inviteLink={inviteLink} inviteStats={inviteStats} onGroupUpdated={() => loadUserGroups(user.uid)} />}
             {currentView === "audit" && selectedGroup.admin === user.uid && <AuditView group={selectedGroup} />}
             </Suspense>

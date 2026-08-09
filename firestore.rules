@@ -365,5 +365,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Publisher RSS is fetched exclusively by the scheduled Cloud Function.
+    // Signed-in players can read the bounded, global cache but cannot alter it.
+    match /news/{sourceId} {
+      allow read: if isAuth();
+      allow write: if false;
+    }
+
   }
 }

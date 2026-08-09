@@ -7,8 +7,23 @@ const { getMessaging } = require("firebase-admin/messaging");
 const { getAuth } = require("firebase-admin/auth");
 const nodemailer = require("nodemailer");
 const crypto = require("crypto");
+const Parser = require("rss-parser");
 
 initializeApp();
+
+// RSS is intentionally limited to what each publisher exposes in its feed.
+// Do not follow item links here: this cache is an aggregator, not a scraper.
+const rssParser = new Parser({
+  timeout: 20_000,
+  headers: { "User-Agent": "F1 Karvaan RSS reader/1.0" },
+  customFields: {
+    item: [
+      ["media:content", "mediaContent", { keepArray: true }],
+      ["media:thumbnail", "mediaThumbnail", { keepArray: true }],
+      ["content:encoded", "contentEncoded"],
+    ],
+  },
+});
 
 const GMAIL_USER = defineSecret("GMAIL_USER");
 const GMAIL_APP_PASSWORD = defineSecret("GMAIL_APP_PASSWORD");
@@ -231,6 +246,132 @@ exports.refreshScheduleCache = onSchedule({ schedule: "every 60 minutes" }, asyn
 
   await db.doc(SCHEDULE_CACHE_DOC).set({ overrides, source, fetchedAt: new Date().toISOString() });
   console.log(`[refreshScheduleCache] Cached overrides for ${Object.keys(overrides).length} round(s) from ${source}`);
+});
+
+// ─── RSS news cache ─────────────────────────────────────────────────────────
+// These are the candidate publishers whose feeds were live-verified with
+// rss-parser on 2026-08-09. Formula1.com is deliberately excluded despite its
+// working feed because its RSS terms prohibit an aggregated news page; ESPN's
+// available motorsport feed returned 403 during verification. Each source is
+// fetched independently so a publisher outage can never erase another source's
+// last known-good cache.
+//
+// FIX (post-build validation): Sky Sports was dropped after a live UI check —
+// https://www.skysports.com/rss/12040 (and every other numeric-ID/slug
+// variant tried: 12433, 12691, 11661, 11095, /rss/motorsport, /rss/f1) all
+// resolve to Sky's single generic all-sports feed, not an F1-specific one.
+// It parsed as valid RSS with real items, so both the pre-build verification
+// pass and Codex's own probing correctly confirmed it "works" — neither
+// checked that the *content* was actually F1-relevant. Rendered live, it
+// filled the News tab with boxing, tennis, golf, and football headlines.
+// Feed technical validity isn't the same thing as topical relevance; no
+// working F1-specific Sky Sports feed could be found, so it's dropped
+// rather than shipping the wrong content.
+const NEWS_SOURCES = [
+  { id: "autosport", sourceName: "Autosport", sourceUrl: "https://www.autosport.com/f1/", feedUrl: "https://www.autosport.com/rss/feed/f1/" },
+  { id: "bbc", sourceName: "BBC Sport", sourceUrl: "https://www.bbc.com/sport/formula1", feedUrl: "https://feeds.bbci.co.uk/sport/formula1/rss.xml" },
+  { id: "f1technical", sourceName: "F1Technical", sourceUrl: "https://www.f1technical.net/", feedUrl: "https://www.f1technical.net/rss/news.xml" },
+  { id: "grandprix", sourceName: "GrandPrix.com", sourceUrl: "https://www.grandprix.com/", feedUrl: "https://www.grandprix.com/rss.xml" },
+  { id: "guardian", sourceName: "The Guardian", sourceUrl: "https://www.theguardian.com/sport/formulaone", feedUrl: "https://www.theguardian.com/sport/formulaone/rss" },
+  { id: "motorsport", sourceName: "Motorsport.com", sourceUrl: "https://www.motorsport.com/f1/", feedUrl: "https://www.motorsport.com/rss/f1/news/" },
+  { id: "racefans", sourceName: "RaceFans", sourceUrl: "https://www.racefans.net/", feedUrl: "https://www.racefans.net/feed/" },
+  { id: "therace", sourceName: "The Race", sourceUrl: "https://www.the-race.com/category/f1/", feedUrl: "https://www.the-race.com/category/f1/feed/" },
+];
+const NEWS_MAX_ITEMS = 20;
+const NEWS_DEFAULT_POLL_MINUTES = 30;
+
+function plainText(value) {
+  return String(value || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function truncateExcerpt(value) {
+  const excerpt = plainText(value);
+  return excerpt.length > 200 ? `${excerpt.slice(0, 197).trimEnd()}...` : excerpt;
+}
+
+function imageUrlFromItem(item) {
+  const candidates = [
+    item.enclosure?.type?.startsWith("image/") ? item.enclosure.url : null,
+    ...(Array.isArray(item.mediaContent) ? item.mediaContent : [item.mediaContent]),
+    ...(Array.isArray(item.mediaThumbnail) ? item.mediaThumbnail : [item.mediaThumbnail]),
+  ];
+  for (const candidate of candidates) {
+    const url = typeof candidate === "string" ? candidate : candidate?.$?.url || candidate?.url;
+    if (typeof url === "string" && /^https?:\/\//i.test(url)) return url;
+  }
+  return null;
+}
+
+function normalizeNewsItems(items, sourceName) {
+  return items.map((item) => {
+    const title = plainText(item.title);
+    const link = item.link;
+    if (!title || !/^https?:\/\//i.test(link || "")) return null;
+    const parsedDate = new Date(item.isoDate || item.pubDate || item.published);
+    const normalized = {
+      title,
+      link,
+      // A malformed/missing item date must not prevent an otherwise valid RSS
+      // item from being shown; the scheduler time is an honest fallback.
+      pubDate: Number.isNaN(parsedDate.getTime()) ? new Date().toISOString() : parsedDate.toISOString(),
+      sourceName,
+      excerpt: truncateExcerpt(item.contentSnippet || item.content || item.contentEncoded || item.summary || item.description),
+    };
+    const imageUrl = imageUrlFromItem(item);
+    if (imageUrl) normalized.imageUrl = imageUrl;
+    return normalized;
+  }).filter(Boolean).slice(0, NEWS_MAX_ITEMS);
+}
+
+function shouldPollNewsSource(cachedData) {
+  const ttlMinutes = Math.max(NEWS_DEFAULT_POLL_MINUTES, Number(cachedData?.pollIntervalMinutes) || 0);
+  const fetchedAt = new Date(cachedData?.fetchedAt || 0).getTime();
+  return !Number.isFinite(fetchedAt) || Date.now() - fetchedAt >= ttlMinutes * 60 * 1000;
+}
+
+exports.refreshNewsCache = onSchedule({ schedule: "every 30 minutes" }, async () => {
+  const db = getFirestore();
+  await Promise.allSettled(NEWS_SOURCES.map(async (source) => {
+    const ref = db.collection("news").doc(source.id);
+    try {
+      const cached = await ref.get();
+      if (cached.exists && !shouldPollNewsSource(cached.data())) return;
+
+      const feed = await rssParser.parseURL(source.feedUrl);
+      const items = normalizeNewsItems(feed.items || [], source.sourceName);
+      // Never replace a good source cache with an empty or partially failed
+      // response. rss-parser throws for malformed XML, and this guard covers
+      // valid-but-empty transient publisher responses.
+      if (!items.length) throw new Error("Feed returned no valid items");
+
+      // RSS ttl is in minutes. Persist it so future scheduler runs honor the
+      // publisher's requested minimum interval; 30 minutes remains the app's
+      // baseline for feeds that do not specify one.
+      const feedTtl = Number(feed.ttl);
+      const pollIntervalMinutes = Number.isFinite(feedTtl) && feedTtl > 0
+        ? Math.max(NEWS_DEFAULT_POLL_MINUTES, feedTtl)
+        : NEWS_DEFAULT_POLL_MINUTES;
+      await ref.set({
+        sourceName: source.sourceName,
+        sourceUrl: source.sourceUrl,
+        items,
+        fetchedAt: new Date().toISOString(),
+        pollIntervalMinutes,
+      });
+      console.log(`[refreshNewsCache] Cached ${items.length} item(s) from ${source.id}`);
+    } catch (err) {
+      console.error(`[refreshNewsCache] ${source.id} failed, keeping existing cache:`, err.message);
+    }
+  }));
 });
 
 // ─── Driver/team performance stats ──────────────────────────────────────────
