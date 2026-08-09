@@ -3,6 +3,36 @@ import { collection, onSnapshot } from 'firebase/firestore';
 import { ExternalLink, Newspaper } from 'lucide-react';
 import { db } from './shared.js';
 
+// FIX (post-user-feedback): Formula1.com has a working RSS feed, but its own
+// legal page (formula1.com's "RSS FEED TERMS OF USE") explicitly prohibits
+// exactly the aggregation pattern the other 8 sources use here — "you may
+// not publish a webpage that simply aggregates the RSS feeds of a specific
+// type of content on the Site." No official embed/widget/API program exists
+// either. A plain hyperlink doesn't touch their RSS feed at all, so it isn't
+// covered by that restriction — this card is a static, non-aggregated
+// link-out, not another source in NEWS_SOURCES.
+function OfficialSourceCard() {
+  return (
+    <a
+      href="https://www.formula1.com/en/latest"
+      target="_blank"
+      rel="noreferrer"
+      className="group block rounded-2xl border border-red-600/50 bg-gradient-to-r from-red-950/40 via-gray-950 to-gray-950 p-5 transition hover:border-red-500"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="text-xs font-black tracking-widest text-red-500">OFFICIAL SOURCE</p>
+          <p className="mt-1 text-base font-bold text-white">Formula1.com</p>
+          <p className="mt-1 text-sm text-gray-400">For official news, race coverage, and the latest from the sport's rightsholder, visit Formula1.com directly.</p>
+        </div>
+        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white transition group-hover:bg-red-500">
+          Visit Formula1.com <ExternalLink size={15} />
+        </span>
+      </div>
+    </a>
+  );
+}
+
 const card = 'bg-gray-950 border border-gray-800 rounded-2xl p-5';
 
 function formatPublishedDate(pubDate) {
@@ -54,6 +84,8 @@ export default function NewsView() {
     </div>
 
     {error && <div className="rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">{error}</div>}
+
+    <OfficialSourceCard />
 
     {sources.length > 0 && <section className={card}>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
