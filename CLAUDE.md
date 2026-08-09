@@ -624,10 +624,23 @@ rules block), hosting (several more times for the pure-frontend
 follow-ups). Firestore integrity check clean throughout.
 
 **Still open / roadmap for v3-v4:**
-- **v3 — AI-summarized digest.** Spec in `buildplan-news-ai.md`, layered on
-  v2's feed pipeline. **Explicitly gated** — the app's owner said this can
-  wait until v2 has been live and stable for a while. Don't build this
-  until that's actually true; the spec file itself repeats this gate.
+- **v3 — AI Insight panel, redesigned.** After seeing v2 live, the app's
+  owner said they weren't convinced by the News tab as a destination and
+  clarified the real intent: the article corpus (v2) and stats data (v1)
+  should ground a feature that helps a player decide who to pick, surfaced
+  where picks actually get made — not a second thing to read. `buildplan-
+  news-ai.md` was rewritten in place to match (the original scheduled-
+  digest design it used to describe is gone, not kept alongside this one):
+  a read-only "AI Insight" panel added directly to `PredictionView.jsx`
+  (not a new tab — native `<select>` prediction fields have no per-option
+  rich-content slot, so a per-driver-hover design isn't feasible without
+  touching the app's most safety-hardened flow, which this doesn't need
+  to). The original "wait until v2 is proven" gate no longer applies as
+  stated — this depends on v2's cache, which is already proven live, not
+  on the News tab's UI specifically. What still deserves care: first
+  LLM-cost-bearing function in the app, surfaced on the highest-stakes
+  page in the app — build and validate carefully for those two reasons,
+  not a calendar gate. Ready to build.
 - **v4 — expand v1-v3 to other motorsports.** No build spec exists yet and
   none should be written until real per-series research happens first:
   does an open, Jolpica/OpenF1-quality API exist for the next series (e.g.

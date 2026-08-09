@@ -1,53 +1,117 @@
-# Build plan: AI News Digest (v3) — GATED, DO NOT BUILD YET
+# Build plan: AI Insight Panel (v3) — supersedes the original digest design
 
-**This spec exists for when it's time, not as something to run now.** The
-app's owner explicitly said this phase "can wait until everything else is
-ready" when the roadmap was agreed. Do not invoke Codex against this file
-until `buildplan-news.md` (v2) has been live and stable for a real
-stretch of time. If you're an agent reading this file wondering whether to
-build it: check with the user first, this gate is intentional, not a
-formality.
+**This spec replaces an earlier version of this file.** The original v3
+design was a scheduled digest bolted onto the News tab. After seeing v2
+live, the app's owner said they weren't convinced by the News tab as a
+destination and clarified the actual intent: the article corpus (v2) and
+the stats data (v1) should ground a feature that helps a player decide who
+to pick, surfaced where picks actually get made — not a second thing to
+read. This document is that redesign, not an addition alongside the old
+one.
 
-## Why, when the time comes
+**On the original "wait until v2 is proven" gate**: this feature depends
+on v2's *cache* (the `news/{sourceId}` pipeline — proven, live, 8 working
+sources, already validated end-to-end), not on the News tab's UI being a
+proven destination. That dependency is already satisfied. What still
+deserves real care: this is the first LLM-cost-bearing function in this
+app, and it's surfaced on `PredictionView.jsx` — the single highest-stakes,
+most safety-hardened page in the app (offline-write guards,
+`waitForServerAck`, lock-time enforcement all live there). Build and
+validate this carefully for those two reasons specifically, not because of
+a calendar-time gate.
 
-Third phase of a 4-phase roadmap. Layers an AI-generated summary on top of
-v2's RSS feed pipeline — a "what's new" digest instead of making the reader
-skim 12 sources' worth of headlines themselves.
+## Why this shape, not a chat interface
 
-## 1. Backend — `refreshNewsDigest`, `functions/index.js`
+Confirmed directly with the app's owner: not open-ended chat. Contextual
+suggestions inside `PredictionView.jsx`, at the point of the actual pick.
 
-- New `onSchedule` function. **Reads the already-cached `news/{sourceId}`
-  docs from v2 — does not fetch anything new itself.** This is a
-  summarization layer on an existing pipeline, not a parallel one.
-- Cadence: daily, or only triggered once a meaningful volume of new items
-  has accumulated since the last digest — summarizing "nothing new"
-  repeatedly wastes API calls for no reader value.
-- LLM call: use an API key managed via `defineSecret`, the same pattern
-  this file already uses for `GMAIL_USER`/`GMAIL_APP_PASSWORD`/
-  `UNSUBSCRIBE_SIGNING_KEY`. **Provider choice (which LLM API) is a real
-  decision the user should confirm at build time** — this was discussed
-  as "cloud API by default, self-hosting only if a real privacy/cost
-  driver shows up," but don't silently lock in a specific provider without
-  checking that's still the preference when this actually gets built.
-- Output cached to `newsDigest/latest`.
+Also confirmed by reading `PredictionView.jsx` directly: every prediction
+field is a plain native `<select>` of `F1_DRIVERS` (`shared.js`) — there is
+no per-option rich-content slot, so a "hover a driver for insight" design
+would require replacing the select inputs, which is far too risky a change
+to the app's most safety-hardened flow for what this feature needs.
+Instead: **one read-only "AI Insight" panel, above the existing form,
+with the actual prediction inputs completely untouched below it.** Zero
+risk to prediction-submission mechanics.
 
-## 2. Frontend — News tab addition
+## 1. Backend — `refreshRoundInsights`, `functions/index.js`
 
-A distinct section in the same `NewsView.jsx` from v2, not a separate tab.
+Modeled on this app's established cache-then-serve pattern
+(`refreshScheduleCache`/`refreshDriverStatsCache`/`refreshNewsCache`), but
+with a different trigger condition — this one costs real money per
+generation (an LLM call), unlike a plain fetch:
 
-**Must be labeled, unambiguously, as AI-generated** — e.g. "AI summary,
-may be inaccurate — see original sources" — and each claim in the summary
-should link back to the specific source item it was drawn from. This is
-the single riskiest part of this whole roadmap, flagged when it was first
-discussed: presenting an LLM's inference as fact, next to a screen where
-the reader is about to make a prediction decision, is a worse failure mode
-than most inaccuracy elsewhere in this app. Do not soften or drop this
-labeling requirement for the sake of a cleaner UI.
+- `onSchedule`, daily — but **no-op most days**. Only call the LLM if (a)
+  the current round has changed since the last cached generation (derive
+  the current round the same way `NewsView.jsx` already does, via
+  `getCurrentRound()`/`F1_SCHEDULE_2026` in `shared.js` — don't
+  reimplement), or (b) meaningfully new news volume has landed in the
+  "most relevant" window since the last generation. Regenerating for an
+  unchanged round on an unchanged news set is pure waste.
+- **Driver selection for the panel**: union of (a) the top N drivers by
+  current championship position (already in cached standings order in
+  `driverStats/{series}`) and (b) any driver whose name appears in this
+  round's "most relevant" news window (reuse `NewsView.jsx`'s existing
+  date-window logic, don't reimplement it). Cap the union at ~8-10 drivers
+  so both the LLM call and the rendered panel stay bounded.
+- **Driver name matching**: `F1_DRIVERS` (`shared.js`) holds full display
+  names ("Max Verstappen"); `driverStats/{series}`'s cached entries already
+  store `driverName` built the same way from Jolpica's given/family name —
+  these should match directly. **Normalize (trim, case-fold) before
+  comparing, and verify all 22 `F1_DRIVERS` names actually match cached
+  `driverName` values during validation** — a silent mismatch would drop a
+  driver from the panel with no visible error anywhere.
+- LLM call: API key via `defineSecret`, same established pattern as
+  `GMAIL_USER`/`UNSUBSCRIBE_SIGNING_KEY`. **Provider choice is a real
+  decision — confirm with the user at build time, don't silently lock one
+  in.** Input per selected driver: their cached stats (recent form/points
+  trend, track history at this round's circuit if cached, qual-vs-race
+  delta) plus any news items mentioning them in the relevant window.
+  Output: a short (2-3 sentence) per-driver blurb where **every claim is
+  traceable to a specific stats field or a specific cached news item** —
+  this is what makes the labeling requirement below actually checkable,
+  not just a UI disclaimer.
+- Cache to `roundInsights/{series}` (single doc, overwritten each
+  generation, no history needed). Never overwrite with a failed/partial
+  LLM response — same "don't cache a bad result as truth" principle as
+  every other cache in this app.
 
-## Validation checklist, when this is actually built
+## 2. Frontend — `PredictionView.jsx` addition
 
-1. Confirm the digest never presents unlabeled claims — spot-check the
-   actual rendered output, not just the code.
-2. Confirm a failed/empty LLM call degrades to "no digest today" rather
-   than showing stale or fabricated content.
-3. Same build/bundle-split checks as v1/v2.
+- New read-only section, above the existing prediction form, inside the
+  same file — **not** a new lazy-loaded view. This needs to load with the
+  form itself, not live behind separate navigation.
+- Reads `roundInsights/{series}` via `onSnapshot`, same pattern as every
+  other cache read in this app.
+- **Must be labeled unambiguously as AI-generated** — e.g. "AI insight, may
+  be inaccurate — verify before you pick" — with each driver's blurb
+  showing or linking the specific stats/news item it drew from. Carried
+  over from the original design, and matters *more* here, not less: this
+  panel sits directly above the controls a player uses to make their
+  actual pick — a more consequential placement than a digest ever was.
+  Do not soften or drop this requirement for a cleaner UI.
+- Degrades silently to not rendering the panel at all if no cached insight
+  exists yet (first deploy, before the function's first run). Never show a
+  loading state that blocks or delays the actual prediction form
+  underneath it.
+
+## 3. Validation checklist (Claude runs this after Codex, before deploy)
+
+1. Read every file touched; diff against this spec.
+2. **Confirm all 22 `F1_DRIVERS` names match `driverStats` `driverName`
+   values** after normalization — check this directly, don't trust it.
+3. Confirm the no-op/regeneration-trigger logic actually skips a call when
+   the round hasn't changed and news hasn't meaningfully moved — this is a
+   cost control; verify it doesn't silently call the LLM every single day.
+4. Confirm every rendered blurb traces back to a real stats field or a
+   real cached news item — spot-check actual output, not just the code.
+5. **Confirm the panel never blocks or delays the prediction form itself
+   rendering and being usable** — this is the one thing that must never
+   regress, on the single most sensitive page in this app.
+6. `npm run build` — confirm no bundle-size regression on
+   `PredictionView.jsx`'s existing chunk (this isn't a new lazy chunk, it's
+   added directly to an existing one — check its size before/after).
+7. Exercise live via `security/e2e-test-signin.cjs` + Playwright, same
+   authenticated-verification pattern as v1/v2 — confirm the panel
+   renders, confirm normal prediction save/submit still works end-to-end
+   exactly as before, zero console errors.
