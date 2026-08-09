@@ -566,3 +566,23 @@ integrity check clean throughout. Pushed to `origin/main` @ `51c16fd`.
 - Memory note `sequencing-rebuild-vs-driver-graph` is now stale (said the
   driver-graph feature needed a separate chat; it shipped in this one) and
   should be updated or retired next time it's touched.
+
+### Roadmap: v2-v4 (news, AI digest, multi-motorsport)
+
+Agreed alongside v1 (the driver/team stats feature above), same 4-phase
+structure:
+- **v2 — RSS news tab.** Spec in `buildplan-news.md`. Curated headlines +
+  excerpts + link-out from up to 12 candidate sources, no full-text
+  scraping, no AI. Ready to build.
+- **v3 — AI-summarized digest.** Spec in `buildplan-news-ai.md`, layered on
+  v2's feed pipeline. **Explicitly gated** — the app's owner said this can
+  wait until v2 has been live and stable for a while. Don't build this
+  until that's actually true; the spec file itself repeats this gate.
+- **v4 — expand v1-v3 to other motorsports.** No build spec exists yet and
+  none should be written until real per-series research happens first:
+  does an open, Jolpica/OpenF1-quality API exist for the next series (e.g.
+  MotoGP), and if not, is a Tier-2-only (curated/RSS) treatment the most
+  that's feasible for it? The data-namespacing groundwork (`driverStats/
+  {series}`) is already in place from v1, so no architecture rework is
+  needed once a series' data situation is actually known — the missing
+  piece is the research itself, not the code.
