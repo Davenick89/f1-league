@@ -274,7 +274,7 @@ const NEWS_SOURCES = [
   { id: "grandprix", sourceName: "GrandPrix.com", sourceUrl: "https://www.grandprix.com/", feedUrl: "https://www.grandprix.com/rss.xml" },
   { id: "guardian", sourceName: "The Guardian", sourceUrl: "https://www.theguardian.com/sport/formulaone", feedUrl: "https://www.theguardian.com/sport/formulaone/rss" },
   { id: "motorsport", sourceName: "Motorsport.com", sourceUrl: "https://www.motorsport.com/f1/", feedUrl: "https://www.motorsport.com/rss/f1/news/" },
-  { id: "racefans", sourceName: "RaceFans", sourceUrl: "https://www.racefans.net/", feedUrl: "https://www.racefans.net/feed/" },
+  { id: "racefans", sourceName: "RaceFans", sourceUrl: "https://www.racefans.net/", feedUrl: "https://www.racefans.net/category/formula-1/feed/" },
   { id: "therace", sourceName: "The Race", sourceUrl: "https://www.the-race.com/category/f1/", feedUrl: "https://www.the-race.com/category/f1/feed/" },
 ];
 const NEWS_MAX_ITEMS = 20;

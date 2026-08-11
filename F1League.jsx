@@ -5,7 +5,7 @@ import { httpsCallable } from 'firebase/functions';
 import { getToken } from 'firebase/messaging';
 import { registerSW } from 'virtual:pwa-register';
 import { validateNickname, validateGroupName, validateInviteCode } from './validation.js';
-import { LogOut, Plus, Users, Trophy, BarChart3, Settings, Calendar, Newspaper } from 'lucide-react';
+import { LogOut, Menu, Plus, Users, Trophy, BarChart3, Settings, Calendar, Newspaper } from 'lucide-react';
 import {
   auth, db, functions, VAPID_KEY, track, fcmSupported, getMessagingInstance,
   F1_SCHEDULE_2026, getCurrentRound, getTimeUntilLock, getValidatedApiSessionStr,
@@ -134,6 +134,7 @@ export default function F1League() {
   const [showSettings, setShowSettings] = useState(false);
   const [currentRound, setCurrentRound] = useState(() => getCurrentRound());
   const [currentView, setCurrentView] = useState("leaderboard");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [countdown, setCountdown] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [renameTarget, setRenameTarget] = useState(null); // { id, name }
@@ -778,13 +779,16 @@ export default function F1League() {
             <span className="hidden sm:block text-gray-700 mx-2">|</span>
             <span className="hidden sm:block text-gray-400 text-sm font-semibold truncate max-w-[180px]">{selectedGroup.name}</span>
           </div>
+          <button onClick={() => setMobileMenuOpen((open) => !open)} className="lg:hidden p-2 text-gray-300 hover:text-white" aria-label="Toggle navigation menu">
+            <Menu size={22} />
+          </button>
         </div>
       </nav>
 
       <div className="max-w-7xl mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* Sidebar */}
-          <div className="lg:col-span-1">
+          <div className={`${mobileMenuOpen ? 'block' : 'hidden'} lg:block lg:col-span-1`}>
             <div className="bg-gray-950 border border-gray-800 rounded-2xl p-3 space-y-1">
               {[
                 { view: "leaderboard", icon: <Trophy size={16} />, label: "Leaderboard" },
@@ -799,7 +803,7 @@ export default function F1League() {
               ].map(({ view, icon, label }) => (
                 <button
                   key={view}
-                  onClick={() => setCurrentView(view)}
+                  onClick={() => { setCurrentView(view); setMobileMenuOpen(false); }}
                   className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-2.5 transition text-sm font-semibold ${
                     currentView === view
                       ? "bg-red-600 text-white"
@@ -811,7 +815,7 @@ export default function F1League() {
               ))}
               {selectedGroup.admin === user.uid && (
                 <button
-                  onClick={() => setCurrentView("audit")}
+                  onClick={() => { setCurrentView("audit"); setMobileMenuOpen(false); }}
                   className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-2.5 transition text-sm font-semibold ${
                     currentView === "audit" ? "bg-yellow-600 text-white" : "text-yellow-600 hover:bg-yellow-600/10"
                   }`}

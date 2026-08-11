@@ -176,14 +176,27 @@ export default function StatsView({ series }) {
   const chartOptions = chartType === 'drivers' ? drivers : constructors;
   const selectedChartEntries = chartOptions.filter((entry) => selectedDrivers.includes(entry.id));
   const colorFor = (entry) => TEAM_COLORS[chartType === 'drivers' ? entry.constructorId : entry.id] || FALLBACK_COLOR;
+  const dashFor = (entry) => {
+    if (chartType !== 'drivers') return undefined;
+    const teammates = drivers.filter((driver) => driver.constructorId === entry.constructorId);
+    if (teammates.length < 2) return undefined;
+    return teammates[0].id === entry.id ? undefined : '6 4';
+  };
   const summary = useMemo(() => drivers.map((driver) => {
     const results = rounds.flatMap((round) => round.drivers?.filter((entry) => entry.driverId === driver.id) || []);
     return { ...driver, wins: results.filter((result) => result.position === 1).length, podiums: results.filter((result) => result.position && result.position <= 3).length, dnfs: results.filter((result) => result.dnf).length };
   }), [drivers, rounds]);
   const deltas = useMemo(() => summary.map((driver) => {
-    const results = rounds.flatMap((round) => round.drivers?.filter((entry) => entry.driverId === driver.id) || []).filter((result) => result.position !== null && Number.isFinite(result.grid));
-    const total = results.reduce((sum, result) => sum + (result.grid - result.position), 0);
-    return { ...driver, delta: total, average: results.length ? total / results.length : 0 };
+    const perRound = rounds.map((round) => {
+      const own = round.drivers?.find((entry) => entry.driverId === driver.id);
+      if (!own || own.position === null || !Number.isFinite(own.grid)) return null;
+      const attritionAhead = (round.drivers || []).filter((entry) =>
+        entry.dnf && Number.isFinite(entry.grid) && entry.grid < own.grid
+      ).length;
+      return (own.grid - own.position) - attritionAhead;
+    }).filter((value) => value !== null);
+    const total = perRound.reduce((sum, value) => sum + value, 0);
+    return { ...driver, delta: total, average: perRound.length ? total / perRound.length : 0 };
   }).sort((a, b) => b.average - a.average), [summary, rounds]);
   // FIX (post-buildplan-stats audit): the spec's frontend requirement is
   // "select two drivers, compare current-season results" — any two drivers,
@@ -249,14 +262,14 @@ export default function StatsView({ series }) {
           defensive fix for this exact class of ResponsiveContainer sizing
           issue and is harmless either way, but flagging it's unconfirmed on
           an actual device. */}
-      <div className="h-72 w-full"><ResponsiveContainer width="100%" height="100%" minWidth={280}><LineChart data={progression}><CartesianGrid stroke="#262626" /><XAxis dataKey="round" stroke="#737373" /><YAxis stroke="#737373" /><Tooltip contentStyle={{ background: '#171717', border: '1px solid #404040' }} /><Legend />{selectedChartEntries.map((entry) => <Line key={entry.id} type="monotone" dataKey={entry.id} name={entry.name} stroke={colorFor(entry)} strokeWidth={2} connectNulls />)}</LineChart></ResponsiveContainer></div>
+      <div className="h-72 w-full"><ResponsiveContainer width="100%" height="100%" minWidth={280}><LineChart data={progression}><CartesianGrid stroke="#262626" /><XAxis dataKey="round" stroke="#737373" /><YAxis stroke="#737373" /><Tooltip contentStyle={{ background: '#171717', border: '1px solid #404040' }} /><Legend />{selectedChartEntries.map((entry) => <Line key={entry.id} type="monotone" dataKey={entry.id} name={entry.name} stroke={colorFor(entry)} strokeDasharray={dashFor(entry)} strokeWidth={2} connectNulls />)}</LineChart></ResponsiveContainer></div>
     </CollapsibleSection>
 
     {/* Defaults collapsed — flagged by the user as the one metric on this
         page that wasn't reading as clearly useful; still available on
         demand rather than removed outright. */}
-    <CollapsibleSection title="Qualifying vs race" defaultOpen={false}>
-      <p className="text-xs text-gray-500 mb-3">Positive values indicate positions gained from the grid to the classified race finish.</p>
+    <CollapsibleSection title="Grid-to-finish movement" defaultOpen={false}>
+      <p className="text-xs text-gray-500 mb-3">Adjusted for cars that retired ahead of this driver — not a count of on-track overtakes.</p>
       <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-gray-500"><tr><th className="pb-2">Driver</th><th className="pb-2">Total delta</th><th className="pb-2">Avg / classified race</th></tr></thead><tbody>{deltas.map((driver) => <tr key={driver.id} className="border-t border-gray-900"><td className="py-2 text-white">{driver.name}</td><td className={driver.delta >= 0 ? 'text-emerald-400' : 'text-red-400'}>{driver.delta > 0 ? '+' : ''}{driver.delta}</td><td className="text-gray-300">{driver.average > 0 ? '+' : ''}{driver.average.toFixed(1)}</td></tr>)}</tbody></table></div>
     </CollapsibleSection>
 

@@ -667,7 +667,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
         )}
 
         {/* ── Prediction status banner — always visible ── */}
-        {raceStatus !== null && (
+        {raceStatus !== null && !isNotYetOpen && (
           editLocked ? (
             <div className="flex items-center gap-3 bg-red-950/60 border border-red-700/50 rounded-lg px-4 py-3 mb-5">
               <Lock size={16} className="text-red-400 shrink-0" />
