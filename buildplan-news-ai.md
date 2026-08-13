@@ -34,6 +34,36 @@ Instead: **one read-only "AI Insight" panel, above the existing form,
 with the actual prediction inputs completely untouched below it.** Zero
 risk to prediction-submission mechanics.
 
+## 0. GATE — check the 8 sources' terms before writing any code
+
+**Do this first; it can change what gets built.** v2 verified that the 8
+sources' feeds *worked* and were F1-scoped. Nobody has checked whether
+their terms permit using their content as LLM input to produce a
+user-facing derivative — a different use from v2's headline-plus-excerpt-
+plus-link-out, and the one publishers most commonly restrict, since a
+generated answer removes the reader's reason to click through.
+
+For each of the 8 (`NEWS_SOURCES` in `functions/index.js`: Autosport, BBC
+Sport, F1Technical, GrandPrix.com, The Guardian, Motorsport.com,
+RaceFans, The Race), check the RSS/content terms for: "personal,
+non-commercial use only" clauses, restrictions on derivative or
+machine-generated works, and anything about AI/LLM training or inference.
+Read the actual terms pages — this is the same verify-live-don't-assume
+discipline that caught the Formula1.com restriction and the Sky Sports
+content bug.
+
+Any source whose terms don't permit this use gets **excluded from the LLM
+corpus only** — it stays in the News tab exactly as today, since v2's
+aggregation use was already verified acceptable for all 8. These are two
+separate permissions; losing one doesn't lose the other. If enough
+sources are excluded that the remaining corpus is too thin to ground
+anything useful, stop and report back rather than shipping a panel with
+nothing behind it.
+
+**Formula1.com stays out of the corpus entirely** — decided 2026-08-10,
+see CLAUDE.md's RSS News Tab section for the full reasoning. Do not
+re-open this without the user explicitly asking.
+
 ## 1. Backend — `refreshRoundInsights`, `functions/index.js`
 
 Modeled on this app's established cache-then-serve pattern
@@ -97,21 +127,24 @@ generation (an LLM call), unlike a plain fetch:
 
 ## 3. Validation checklist (Claude runs this after Codex, before deploy)
 
-1. Read every file touched; diff against this spec.
-2. **Confirm all 22 `F1_DRIVERS` names match `driverStats` `driverName`
+1. Confirm section 0's terms check was actually done, and that the
+   corpus only draws from sources it cleared — check the shipped source
+   list against the check's findings, not just that a check happened.
+2. Read every file touched; diff against this spec.
+3. **Confirm all 22 `F1_DRIVERS` names match `driverStats` `driverName`
    values** after normalization — check this directly, don't trust it.
-3. Confirm the no-op/regeneration-trigger logic actually skips a call when
+4. Confirm the no-op/regeneration-trigger logic actually skips a call when
    the round hasn't changed and news hasn't meaningfully moved — this is a
    cost control; verify it doesn't silently call the LLM every single day.
-4. Confirm every rendered blurb traces back to a real stats field or a
+5. Confirm every rendered blurb traces back to a real stats field or a
    real cached news item — spot-check actual output, not just the code.
-5. **Confirm the panel never blocks or delays the prediction form itself
+6. **Confirm the panel never blocks or delays the prediction form itself
    rendering and being usable** — this is the one thing that must never
    regress, on the single most sensitive page in this app.
-6. `npm run build` — confirm no bundle-size regression on
+7. `npm run build` — confirm no bundle-size regression on
    `PredictionView.jsx`'s existing chunk (this isn't a new lazy chunk, it's
    added directly to an existing one — check its size before/after).
-7. Exercise live via `security/e2e-test-signin.cjs` + Playwright, same
+8. Exercise live via `security/e2e-test-signin.cjs` + Playwright, same
    authenticated-verification pattern as v1/v2 — confirm the panel
    renders, confirm normal prediction save/submit still works end-to-end
    exactly as before, zero console errors.
