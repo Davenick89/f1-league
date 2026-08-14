@@ -91,16 +91,71 @@ generation (an LLM call), unlike a plain fetch:
   comparing, and verify all 22 `F1_DRIVERS` names actually match cached
   `driverName` values during validation** — a silent mismatch would drop a
   driver from the panel with no visible error anywhere.
-- LLM call: API key via `defineSecret`, same established pattern as
-  `GMAIL_USER`/`UNSUBSCRIBE_SIGNING_KEY`. **Provider choice is a real
-  decision — confirm with the user at build time, don't silently lock one
-  in.** Input per selected driver: their cached stats (recent form/points
-  trend, track history at this round's circuit if cached, qual-vs-race
-  delta) plus any news items mentioning them in the relevant window.
-  Output: a short (2-3 sentence) per-driver blurb where **every claim is
-  traceable to a specific stats field or a specific cached news item** —
-  this is what makes the labeling requirement below actually checkable,
-  not just a UI disclaimer.
+- **LLM call — OpenRouter** (decided 2026-08-14). API key via
+  `defineSecret`, same established pattern as
+  `GMAIL_USER`/`UNSUBSCRIBE_SIGNING_KEY`. OpenRouter fronts many models
+  behind one endpoint and key, so the model becomes a config string rather
+  than an integration. Put it behind a single `generateInsight()` seam so
+  swapping models — or providers entirely — is a one-line change.
+  - Pick the specific model from OpenRouter's live model list at build
+    time; don't hardcode one from this document, model naming moves fast
+    and this spec may be stale by then. A fast mid-tier model is ample —
+    this is short, grounded, batch generation, not frontier reasoning.
+  - Self-hosting (Ollama + Qwen3 8B on the VPS) was costed out and set
+    aside: the VPS has 11GB RAM with no GPU and also runs dev sessions,
+    Codex and Chromium, so an 8B model fits but leaves the box contended;
+    more importantly, hosting weights would force this function off Cloud
+    Functions entirely (they can't host a local model) onto a VPS cron,
+    making a dev box a production dependency. OpenRouter keeps the
+    architecture as specced. Revisit only if API cost or availability
+    actually becomes a problem — the seam above makes that cheap.
+- **One LLM call per driver, not one call containing all drivers.** Less
+  context per call means less room to drift — which directly serves the
+  traceability requirement — and one driver's failed generation doesn't
+  take down the whole batch. Same total cost, better output, more robust.
+- Input per driver: their cached stats (recent form/points trend, track
+  history at this round's circuit if cached, grid-to-finish movement) plus
+  any news items mentioning them in the relevant window. Output: a short
+  (2-3 sentence) blurb, returned as **structured JSON carrying explicit
+  source references** — e.g. `{ text, sources: [{ type: "stat", field },
+  { type: "news", link }] }`. Free-text output with sources named only
+  inside the prose is not sufficient; section 1a depends on these being
+  machine-checkable.
+
+### 1a. Citation validation — reject, don't trust
+
+Before anything is cached, validate every blurb's `sources` array
+programmatically:
+- Each `type: "news"` reference must match the `link` of an item actually
+  present in the cached `news/{sourceId}` docs.
+- Each `type: "stat"` reference must name a field that actually exists for
+  that driver in `driverStats/{series}`.
+- A blurb with any unresolvable reference is **dropped, not cached**, and
+  logged with the offending reference. Better to show fewer drivers than
+  one fabricated claim.
+
+This is the real guard against hallucination, and it's deliberately
+deterministic rather than a second "verifier" LLM — a fabricated citation
+is caught with certainty and in milliseconds, where a verifier model would
+only approximate the same check probabilistically at extra cost. If a
+chosen model turns out to fail this check often, that's evidence to switch
+models via the seam above, not to add more model layers.
+
+### 1b. Cost shape — bounded by design, not by user count
+
+Worth stating explicitly since it drives whether this ever needs metering:
+this is a **scheduled batch job**, not a per-user or on-demand call. Cost
+is a function of rounds per season and drivers per round — roughly ten
+short generations on the days it runs at all, and it no-ops entirely on
+unchanged days. **It costs the same with 10 users or 10,000**, because
+every user reads the same cached Firestore doc.
+
+That means usage cost cannot spiral with growth, and no premium tier or
+metering is needed to contain it. Keep it that way: **do not add a
+per-user or on-demand LLM path** (e.g. "ask a question about this
+driver") without re-costing from scratch — that would change the cost
+model from O(1) per day to O(users), which is the shape that would
+actually need a paid tier behind it.
 - Cache to `roundInsights/{series}` (single doc, overwritten each
   generation, no history needed). Never overwrite with a failed/partial
   LLM response — same "don't cache a bad result as truth" principle as
@@ -136,15 +191,20 @@ generation (an LLM call), unlike a plain fetch:
 4. Confirm the no-op/regeneration-trigger logic actually skips a call when
    the round hasn't changed and news hasn't meaningfully moved — this is a
    cost control; verify it doesn't silently call the LLM every single day.
-5. Confirm every rendered blurb traces back to a real stats field or a
+5. **Test citation validation (section 1a) against a deliberately bad
+   response** — feed it a blurb citing a news link and a stat field that
+   don't exist, and confirm it's dropped rather than cached. This is the
+   feature's main safety mechanism; verify it by making it fire, not by
+   reading the code.
+6. Confirm every rendered blurb traces back to a real stats field or a
    real cached news item — spot-check actual output, not just the code.
-6. **Confirm the panel never blocks or delays the prediction form itself
+7. **Confirm the panel never blocks or delays the prediction form itself
    rendering and being usable** — this is the one thing that must never
    regress, on the single most sensitive page in this app.
-7. `npm run build` — confirm no bundle-size regression on
+8. `npm run build` — confirm no bundle-size regression on
    `PredictionView.jsx`'s existing chunk (this isn't a new lazy chunk, it's
    added directly to an existing one — check its size before/after).
-8. Exercise live via `security/e2e-test-signin.cjs` + Playwright, same
+9. Exercise live via `security/e2e-test-signin.cjs` + Playwright, same
    authenticated-verification pattern as v1/v2 — confirm the panel
    renders, confirm normal prediction save/submit still works end-to-end
    exactly as before, zero console errors.
