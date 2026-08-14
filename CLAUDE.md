@@ -85,7 +85,8 @@ Global season stats (not scoped to any league) — points progression, qual-vs-r
 ### RSS News Tab (v2)
 Global (not scoped to any league) — curated headlines + ≤200-char excerpts + source attribution + link-out, no full-text scraping, no AI. Spec in `buildplan-news.md`; view is `NewsView.jsx`, nav entry between Stats and Invite.
 - **Data model**: one Firestore doc per source, `/news/{sourceId}` (`{ sourceName, sourceUrl, items: [...], fetchedAt, pollIntervalMinutes }`, ≤20 items each). `refreshNewsCache` fetches every source independently via `Promise.allSettled` — one publisher's outage or a malformed feed never blocks the others' refresh, and a source is only overwritten if that fetch+parse returned at least one item (a transient empty/failed response never overwrites a good cache, same principle as `getDriverCircuitHistory`'s fix above). Respects each feed's own `<ttl>` if present, minimum 30 min otherwise.
-- **8 live sources**: Autosport, BBC Sport, F1Technical, GrandPrix.com, The Guardian, Motorsport.com, RaceFans, The Race — all live-verified (both feed validity *and* that the content is actually F1-relevant, not just parseable RSS).
+- **8 live sources**: Autosport, BBC Sport, F1Technical, GrandPrix.com, The Guardian, Motorsport.com, RaceFans, The Race — all live-verified (both feed validity *and* that the content is actually F1-relevant, not just parseable RSS). RaceFans uses its `/category/formula-1/feed/` URL, not the general `/feed/` (which mixes in IndyCar/WEC/F2) — see `buildplan-ux-fixes.md`.
+- **Per-source dedup by `link`**: `normalizeNewsItems` (`functions/index.js`) dedupes each source's own items by `link`, keeping the earliest `pubDate` for a repeated link — a real bug, caught live (Autosport listed "FIA lifts sanctions on Russian, Belarusian drivers" twice, minutes apart). Deliberately link-only, not fuzzy-matched: Autosport and Motorsport.com share a parent and often run near-identical stories under different headlines, and cross-source fuzzy dedup risks false positives for real editorial distinctness — not attempted.
 - **Formula1.com is deliberately excluded from `NEWS_SOURCES` — do not add it.** Their own "RSS FEED TERMS OF USE" page explicitly prohibits this feature's exact pattern ("you may not publish a webpage that simply aggregates the RSS feeds of a specific type of content on the Site") — verified directly against their legal page, not assumed. No official embed/widget/API program exists either. Represented instead by `OfficialSourceCard` in `NewsView.jsx`: a static link-out to formula1.com that touches zero RSS content, so the restriction (which only covers their RSS feed) doesn't apply to it. User explicitly confirmed (2026-08-09) they're fine holding this as link-only; see the `driver-stats-v2-v3-roadmap` memory note for the fuller record, including the X/Twitter-embed alternative that was considered and declined.
   - **Also excluded from v3's LLM corpus, not just from display** (decided 2026-08-10). The question was raised: if the articles can't be shown, can their content still feed the AI Insight panel's suggestions? Technically distinguishable from the verified aggregation clause — but declined on two grounds. (1) The legal picture is greyer, not clearer: only that one clause was ever read, RSS terms commonly also carry personal/non-commercial restrictions, and generating derivative summaries is the use publishers restrict most, since a generated answer removes the reader's reason to click through — arguably worse from a publisher's view than aggregation-with-link-out, which at least sends traffic back. Copyright is a separate question from ToS regardless. (2) The value is marginal: facts aren't copyrightable and F1.com has no factual exclusivity that survives an hour — penalties, upgrades, driver form all get reported by the other 8 sources same-day. What's distinctive about F1.com is their framing and phrasing, which is exactly the protected part. Do not re-open without the user explicitly asking.
   - **Open question this surfaced, applying to all 8 included sources:** v2 verified their feeds worked and were F1-scoped, but nobody checked whether their terms permit LLM-derivative use — a different permission from v2's aggregation use. Now a hard gate at the top of `buildplan-news-ai.md` (section 0), to be done before v3 writes any code. Note these are two separate permissions: a source failing the LLM check is excluded from the corpus only, and stays in the News tab exactly as today.
@@ -577,11 +578,14 @@ integrity check clean throughout. Pushed to `origin/main` @ `51c16fd`.
 - The real-device PWA test (Add to Home Screen, real FCM push) and the
   tap-to-refresh end-to-end click-through — both still need a check on an
   actual phone/browser session, not this VPS.
-- The migration script decision (`security/backups/migrate-schedule-renumber.cjs`)
-  — still undecided, unchanged from earlier status updates.
-- Memory note `sequencing-rebuild-vs-driver-graph` is now stale (said the
+- ~~The migration script decision (`security/backups/migrate-schedule-renumber.cjs`)
+  — still undecided, unchanged from earlier status updates.~~ — resolved
+  2026-08-14: archived. See the 2026-08-14 update below.
+- ~~Memory note `sequencing-rebuild-vs-driver-graph` is now stale (said the
   driver-graph feature needed a separate chat; it shipped in this one) and
-  should be updated or retired next time it's touched.
+  should be updated or retired next time it's touched.~~ — resolved
+  2026-08-14: no such memory file exists anymore. See the 2026-08-14 update
+  below.
 
 ### Update — 2026-08-09: RSS News Tab (v2) shipped, live-patched, Formula1.com resolved
 
@@ -653,3 +657,42 @@ follow-ups). Firestore integrity check clean throughout.
   piece is the research itself, not the code. The user has also said
   proper Formula1.com integration (beyond the link-only card) might
   belong in this phase — see the `driver-stats-v2-v3-roadmap` memory note.
+
+### Update — 2026-08-14: News dedup bug fix + housekeeping batch
+
+**News dedup bug, found via real-device screenshots**: the News tab had no
+deduplication — a publisher listing the same story twice (Autosport ran
+"FIA lifts sanctions on Russian, Belarusian drivers" twice, minutes apart)
+passed straight through, since neither `normalizeNewsItems` nor the
+`refreshNewsCache` write path deduped by `link` or `guid`. Fixed in
+`normalizeNewsItems` (`functions/index.js`) — dedupes by `link` within each
+source's own item array, keeping the earliest `pubDate` for a repeated
+link; see the RSS News Tab section above for why this is deliberately
+link-only, not fuzzy cross-source matching. Deployed (functions only).
+
+**Housekeeping, all three items carried as "still open" since the
+2026-08-07 Stats v1 update:**
+- **`security/backups/migrate-schedule-renumber.cjs`** — archived, not
+  generalized. It already did its one job (the Bahrain/Saudi Arabia
+  renumber, 2026-08-06/07) and there's no concrete reason to keep it hot
+  for a hypothetical future disruption. Moved to
+  `security/backups/archive/` with a header marking it historical —
+  kept as a worked reference for *how* to write the next one, not as a
+  reusable tool (still hardcoded to one `groupId` and one round map). This
+  whole directory is gitignored (real backup data), so this was a
+  filesystem move only, no commit.
+- **Memory note `sequencing-rebuild-vs-driver-graph`** — turned out to
+  already be resolved: no separate memory file by that name exists
+  anymore. The current `driver-stats-v2-v3-roadmap` memory note already
+  states plainly that the "separate chat" plan was superseded when Stats
+  v1 shipped in the same session. Nothing left to update or retire — this
+  bullet itself was the only remaining stale artifact, now removed.
+- **`screenshots/` in git history** (~1.3MB, one commit, `b75c53b`) —
+  keeping it as-is; rewriting main's history to remove it isn't worth the
+  disruption for a single already-shared round. Decided as policy for any
+  *future* design-review round: don't commit screenshots to `main` again.
+  Git can't delta-compress PNGs, so a recurring habit would permanently
+  bloat every future clone. If Design needs a durable git-hosted link
+  again, use a dedicated orphan branch (rewritten/force-pushed each round,
+  not accumulated) rather than `main`; for one-off sharing, prefer
+  sending the files directly over committing them at all.

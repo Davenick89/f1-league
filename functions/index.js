@@ -312,10 +312,18 @@ function imageUrlFromItem(item) {
 }
 
 function normalizeNewsItems(items, sourceName) {
-  return items.map((item) => {
+  // Dedupe by link — a publisher can list the same story twice (e.g. a
+  // same-source repost minutes apart); keep the earliest pubDate seen for a
+  // given link. Insertion order (first occurrence) drives output order,
+  // which still tracks the feed's own newest-first ordering. Deliberately
+  // link-only: cross-source near-duplicates (different headline, same
+  // story) would need fuzzy matching, which risks false positives and is
+  // out of scope here.
+  const byLink = new Map();
+  for (const item of items) {
     const title = plainText(item.title);
     const link = item.link;
-    if (!title || !/^https?:\/\//i.test(link || "")) return null;
+    if (!title || !/^https?:\/\//i.test(link || "")) continue;
     const parsedDate = new Date(item.isoDate || item.pubDate || item.published);
     const normalized = {
       title,
@@ -328,8 +336,11 @@ function normalizeNewsItems(items, sourceName) {
     };
     const imageUrl = imageUrlFromItem(item);
     if (imageUrl) normalized.imageUrl = imageUrl;
-    return normalized;
-  }).filter(Boolean).slice(0, NEWS_MAX_ITEMS);
+
+    const existing = byLink.get(link);
+    if (!existing || normalized.pubDate < existing.pubDate) byLink.set(link, normalized);
+  }
+  return Array.from(byLink.values()).slice(0, NEWS_MAX_ITEMS);
 }
 
 function shouldPollNewsSource(cachedData) {
