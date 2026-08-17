@@ -42,19 +42,29 @@ function Select({ value, onChange, children }) {
 function formatPublishedDate(pubDate) {
   const date = new Date(pubDate);
   if (Number.isNaN(date.getTime())) return 'Date unavailable';
-  return date.toLocaleString(undefined, {
-    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
+  const elapsedMinutes = Math.floor((Date.now() - date.getTime()) / 60000);
+  if (elapsedMinutes >= 0 && elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours >= 0 && elapsedHours < 24) return `${elapsedHours}h ago`;
+  const today = new Date();
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  if (date >= yesterday && date < new Date(today.getFullYear(), today.getMonth(), today.getDate())) return 'Yesterday';
+  const elapsedDays = Math.floor(elapsedMinutes / (60 * 24));
+  if (elapsedDays >= 0 && elapsedDays < 7) return `${elapsedDays} days ago`;
+  return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
-function NewsArticle({ item }) {
+function NewsArticle({ item, featured = false }) {
+  const [imageAvailable, setImageAvailable] = useState(Boolean(item.imageUrl));
   return <article className={`${card} flex gap-4`}>
-    {item.imageUrl && <img src={item.imageUrl} alt="" onError={(event) => { event.currentTarget.style.display = 'none'; }} className="hidden sm:block w-28 h-20 object-cover rounded-lg bg-gray-900" loading="lazy" />}
+    <div className="hidden sm:block w-28 h-20 shrink-0 overflow-hidden rounded-lg bg-gray-900">
+      {imageAvailable && <img src={item.imageUrl} alt="" onError={() => setImageAvailable(false)} className="h-full w-full object-cover" loading="lazy" />}
+    </div>
     <div className="min-w-0 flex-1">
-      <a href={item.link} target="_blank" rel="noreferrer" className="group inline-flex items-start gap-1.5 text-base font-bold text-white hover:text-red-400 transition">
+      <a href={item.link} target="_blank" rel="noreferrer" className={`group inline-flex items-start gap-1.5 font-bold text-white hover:text-red-400 transition ${featured ? 'text-lg' : 'text-base'}`}>
         <span>{item.title}</span><ExternalLink size={15} className="mt-1 shrink-0 opacity-60 group-hover:opacity-100" aria-label="Opens original article in a new tab" />
       </a>
-      {item.excerpt && <p className="mt-2 text-sm leading-6 text-gray-400">{item.excerpt}</p>}
+      {item.excerpt && <p className="mt-2 text-sm leading-6 text-gray-400 line-clamp-2">{item.excerpt}</p>}
       <p className="mt-3 text-xs text-gray-600">via <span className="text-gray-400 font-semibold">{item.sourceName}</span> · {formatPublishedDate(item.pubDate)}</p>
     </div>
   </article>;
@@ -189,7 +199,7 @@ export default function NewsView() {
         {nextRace ? ` — build-up, updates, and any penalties or rule changes ahead of the ${nextRace.name} Grand Prix` : ''}.
       </p>
       <div className="space-y-3">
-        {(showAllRelevant ? mostRelevantItems : mostRelevantItems.slice(0, MOST_RELEVANT_PREVIEW_COUNT)).map((item, index) => <NewsArticle key={`${item.link}-${index}`} item={item} />)}
+        {(showAllRelevant ? mostRelevantItems : mostRelevantItems.slice(0, MOST_RELEVANT_PREVIEW_COUNT)).map((item, index) => <NewsArticle key={`${item.link}-${index}`} item={item} featured={index === 0} />)}
       </div>
       {mostRelevantItems.length > MOST_RELEVANT_PREVIEW_COUNT && <button onClick={() => setShowAllRelevant((open) => !open)} className="mt-3 flex items-center gap-2 text-sm font-semibold text-gray-400 hover:text-white transition">
         <span className={`inline-block text-xs transition-transform ${showAllRelevant ? '' : '-rotate-90'}`}>▼</span>

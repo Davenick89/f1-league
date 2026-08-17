@@ -64,6 +64,14 @@ function CollapsibleSection({ title, headerExtra, defaultOpen = true, children }
   );
 }
 
+function TeamRail({ constructorId }) {
+  return <span aria-hidden="true" className="h-5 w-[3px] shrink-0 rounded-full" style={{ backgroundColor: TEAM_COLORS[constructorId] || FALLBACK_COLOR }} />;
+}
+
+function DriverCell({ driver }) {
+  return <td className="py-2 pr-4 text-white whitespace-nowrap"><span className="flex items-center gap-2"><TeamRail constructorId={driver.constructorId} />{driver.name}</span></td>;
+}
+
 export default function StatsView({ series }) {
   const [stats, setStats] = useState(null);
   const [error, setError] = useState('');
@@ -76,6 +84,8 @@ export default function StatsView({ series }) {
   const [history, setHistory] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [allCircuits, setAllCircuits] = useState([]);
+  const [showAllSeasonForm, setShowAllSeasonForm] = useState(false);
+  const [headToHeadMode, setHeadToHeadMode] = useState('teammates');
 
   // FIX (post-buildplan-stats audit): 'system/driverStats/{series}' is a
   // 3-segment (odd) path — Firestore resolves that to a collection, not a
@@ -204,6 +214,44 @@ export default function StatsView({ series }) {
     if (race.second.position && !race.first.position) return { ...totals, second: totals.second + 1 };
     return totals;
   }, { first: 0, second: 0 });
+  const teammateHeadToHeads = useMemo(() => {
+    const pairsByConstructor = new Map();
+    rounds.forEach((round) => {
+      const byConstructor = new Map();
+      (round.drivers || []).forEach((driver) => {
+        if (!driver.constructorId) return;
+        const teammates = byConstructor.get(driver.constructorId) || [];
+        teammates.push(driver);
+        byConstructor.set(driver.constructorId, teammates);
+      });
+      byConstructor.forEach((teammates, constructorId) => {
+        if (teammates.length !== 2) return;
+        const [first, second] = teammates;
+        const ids = [first.driverId, second.driverId].sort();
+        const key = `${constructorId}:${ids.join(':')}`;
+        const pair = pairsByConstructor.get(key) || {
+          constructorId, first: ids[0] === first.driverId ? first : second,
+          second: ids[1] === second.driverId ? second : first,
+          sharedRounds: 0, qualifying: [0, 0], race: [0, 0],
+        };
+        const ordered = [pair.first.driverId === first.driverId ? first : second, pair.second.driverId === second.driverId ? second : first];
+        pair.sharedRounds += 1;
+        if (Number.isFinite(ordered[0].grid) && Number.isFinite(ordered[1].grid) && ordered[0].grid !== ordered[1].grid) {
+          pair.qualifying[ordered[0].grid < ordered[1].grid ? 0 : 1] += 1;
+        }
+        if (ordered[0].position !== null && ordered[1].position !== null && ordered[0].position !== ordered[1].position) {
+          pair.race[ordered[0].position < ordered[1].position ? 0 : 1] += 1;
+        }
+        pairsByConstructor.set(key, pair);
+      });
+    });
+    const bestByConstructor = new Map();
+    pairsByConstructor.forEach((pair) => {
+      const current = bestByConstructor.get(pair.constructorId);
+      if (!current || pair.sharedRounds > current.sharedRounds) bestByConstructor.set(pair.constructorId, pair);
+    });
+    return [...bestByConstructor.values()].sort((a, b) => b.sharedRounds - a.sharedRounds || a.first.driverName.localeCompare(b.first.driverName));
+  }, [rounds]);
 
   // FIX (post-Stats-v1 audit, round 3): `history` used to only ever be set
   // inside loadHistory(), never cleared when the driver/circuit selection
@@ -238,7 +286,15 @@ export default function StatsView({ series }) {
         <button onClick={() => setSelectedDrivers(chartOptions.map((entry) => entry.id))} className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 font-semibold">Select All</button>
         <button onClick={() => setSelectedDrivers([])} className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-300 hover:bg-gray-700 font-semibold">Clear</button>
         <span className="w-px h-4 bg-gray-800" />
-        {chartOptions.map((entry) => <button key={entry.id} onClick={() => setSelectedDrivers((selected) => selected.includes(entry.id) ? selected.filter((id) => id !== entry.id) : [...selected, entry.id])} style={selectedDrivers.includes(entry.id) ? { background: colorFor(entry), color: readableTextColor(colorFor(entry)) } : undefined} className={`text-xs px-2 py-1 rounded font-semibold ${selectedDrivers.includes(entry.id) ? '' : 'bg-gray-900 text-gray-500'}`}>{entry.name}</button>)}
+        {chartType === 'drivers' ? constructors.map((team) => {
+          const teamDrivers = drivers.filter((driver) => driver.constructorId === team.id);
+          if (!teamDrivers.length) return null;
+          return <div key={team.id} className="flex flex-wrap items-center gap-2 rounded-lg bg-gray-900/50 px-2 py-1">
+            <span className="h-4 w-[3px] rounded-full" style={{ backgroundColor: colorFor({ constructorId: team.id }) }} />
+            <span className="text-xs font-semibold text-gray-400">{team.name}</span>
+            {teamDrivers.map((entry) => <button key={entry.id} onClick={() => setSelectedDrivers((selected) => selected.includes(entry.id) ? selected.filter((id) => id !== entry.id) : [...selected, entry.id])} style={selectedDrivers.includes(entry.id) ? { background: colorFor(entry), color: readableTextColor(colorFor(entry)) } : undefined} className={`text-xs px-2 py-1 rounded font-semibold ${selectedDrivers.includes(entry.id) ? '' : 'bg-gray-950 text-gray-500'}`}>{entry.name}</button>)}
+          </div>;
+        }) : chartOptions.map((entry) => <button key={entry.id} onClick={() => setSelectedDrivers((selected) => selected.includes(entry.id) ? selected.filter((id) => id !== entry.id) : [...selected, entry.id])} style={selectedDrivers.includes(entry.id) ? { background: colorFor(entry), color: readableTextColor(colorFor(entry)) } : undefined} className={`text-xs px-2 py-1 rounded font-semibold ${selectedDrivers.includes(entry.id) ? '' : 'bg-gray-900 text-gray-500'}`}>{entry.name}</button>)}
       </div>
       {/* FIX: explicit w-full alongside the fixed h-72 so ResponsiveContainer
           always has an unambiguous, non-zero size to measure — reported
@@ -251,21 +307,25 @@ export default function StatsView({ series }) {
       <div className="h-72 w-full"><ResponsiveContainer width="100%" height="100%" minWidth={280}><LineChart data={progression}><CartesianGrid stroke="#262626" /><XAxis dataKey="round" stroke="#737373" /><YAxis stroke="#737373" /><Tooltip contentStyle={{ background: '#171717', border: '1px solid #404040' }} /><Legend />{selectedChartEntries.map((entry) => <Line key={entry.id} type="monotone" dataKey={entry.id} name={entry.name} stroke={colorFor(entry)} strokeDasharray={dashFor(entry)} strokeWidth={2} connectNulls />)}</LineChart></ResponsiveContainer></div>
     </CollapsibleSection>
 
-    {/* Defaults collapsed — flagged by the user as the one metric on this
-        page that wasn't reading as clearly useful; still available on
-        demand rather than removed outright. */}
-    <CollapsibleSection title="Grid-to-finish movement" defaultOpen={false}>
+    <CollapsibleSection title="Season form">
       <p className="text-xs text-gray-500 mb-3">Adjusted for cars that retired ahead of this driver — not a count of on-track overtakes.</p>
-      <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-gray-500"><tr><th className="pb-2">Driver</th><th className="pb-2">Total delta</th><th className="pb-2">Avg / classified race</th></tr></thead><tbody>{deltas.map((driver) => <tr key={driver.id} className="border-t border-gray-900"><td className="py-2 text-white">{driver.name}</td><td className={driver.delta >= 0 ? 'text-emerald-400' : 'text-red-400'}>{driver.delta > 0 ? '+' : ''}{driver.delta}</td><td className="text-gray-300">{driver.average > 0 ? '+' : ''}{driver.average.toFixed(1)}</td></tr>)}</tbody></table></div>
-    </CollapsibleSection>
-
-    <CollapsibleSection title="Wins, podiums & DNFs">
-      <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="text-left text-gray-500"><tr><th className="pb-2">Driver</th><th className="pb-2">Wins</th><th className="pb-2">Podiums</th><th className="pb-2">DNFs</th></tr></thead><tbody>{[...summary].sort((a, b) => b.wins - a.wins || b.podiums - a.podiums).map((driver) => <tr key={driver.id} className="border-t border-gray-900"><td className="py-2 text-white">{driver.name}</td><td>{driver.wins}</td><td>{driver.podiums}</td><td className={driver.dnfs ? 'text-red-400' : 'text-gray-300'}>{driver.dnfs}</td></tr>)}</tbody></table></div>
+      <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="text-left text-gray-500"><tr><th className="pb-2 pr-4 whitespace-nowrap">Driver</th><th className="pb-2 pr-4 text-right tabular-nums whitespace-nowrap">Wins</th><th className="pb-2 pr-4 text-right tabular-nums whitespace-nowrap">Podiums</th><th className="pb-2 pr-4 text-right tabular-nums whitespace-nowrap">DNFs</th><th className="pb-2 pr-4 text-right tabular-nums whitespace-nowrap">Gained (total)</th><th className="pb-2 text-right tabular-nums whitespace-nowrap">Gained (avg)</th></tr></thead><tbody>{(() => {
+        const movementByDriver = new Map(deltas.map((driver) => [driver.id, driver]));
+        const rows = [...summary].sort((a, b) => b.wins - a.wins || b.podiums - a.podiums || a.name.localeCompare(b.name));
+        return (showAllSeasonForm ? rows : rows.slice(0, 10)).map((driver) => {
+          const movement = movementByDriver.get(driver.id);
+          return <tr key={driver.id} className="border-t border-gray-900"><DriverCell driver={driver} /><td className="pr-4 text-right tabular-nums">{driver.wins}</td><td className="pr-4 text-right tabular-nums">{driver.podiums}</td><td className={`pr-4 text-right tabular-nums ${driver.dnfs ? 'text-red-400' : 'text-gray-300'}`}>{driver.dnfs}</td><td className={`pr-4 text-right tabular-nums ${movement?.delta >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{movement?.delta > 0 ? '+' : ''}{movement?.delta ?? 0}</td><td className="text-right tabular-nums text-gray-300">{movement?.average > 0 ? '+' : ''}{(movement?.average ?? 0).toFixed(1)}</td></tr>;
+        });
+      })()}</tbody></table></div>
+      {summary.length > 10 && <button onClick={() => setShowAllSeasonForm((open) => !open)} className="mt-3 flex items-center gap-2 text-sm font-semibold text-gray-400 hover:text-white transition"><span className={`inline-block text-xs transition-transform ${showAllSeasonForm ? '' : '-rotate-90'}`}>▼</span>{showAllSeasonForm ? 'Show fewer' : `Show all ${summary.length} drivers`}</button>}
     </CollapsibleSection>
 
     <CollapsibleSection title="Head-to-head">
-      <div className="flex flex-wrap gap-3 mb-4"><Select value={firstDriver} onChange={setFirstDriver}>{drivers.map((driver) => <option value={driver.id} key={driver.id}>{driver.name}</option>)}</Select><Select value={secondDriver} onChange={setSecondDriver}>{drivers.map((driver) => <option value={driver.id} key={driver.id}>{driver.name}</option>)}</Select></div>
-      {headToHead.length ? <><p className="text-sm text-gray-300 mb-3"><span className="text-white font-bold">{drivers.find((driver) => driver.id === firstDriver)?.name}: {h2hWins.first}</span> · <span className="text-white font-bold">{drivers.find((driver) => driver.id === secondDriver)?.name}: {h2hWins.second}</span> race finishes ahead</p><div className="space-y-2">{headToHead.map((race) => <div key={race.round} className="text-sm flex justify-between border-t border-gray-900 pt-2"><span className="text-gray-400">R{race.round} · {race.raceName}{race.teammates ? ' · teammates' : ''}</span><span className="text-white">{race.first.positionText} — {race.second.positionText}</span></div>)}</div></> : <p className="text-sm text-gray-500">These drivers haven't both raced in a cached round this season.</p>}
+      <div className="flex gap-2 mb-4"><button onClick={() => setHeadToHeadMode('teammates')} className={`px-3 py-1.5 rounded-lg text-sm ${headToHeadMode === 'teammates' ? 'bg-red-600 text-white' : 'bg-gray-900 text-gray-400'}`}>Teammates</button><button onClick={() => setHeadToHeadMode('any')} className={`px-3 py-1.5 rounded-lg text-sm ${headToHeadMode === 'any' ? 'bg-red-600 text-white' : 'bg-gray-900 text-gray-400'}`}>Any two drivers</button></div>
+      {headToHeadMode === 'teammates' ? (teammateHeadToHeads.length ? <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="text-left text-gray-500"><tr><th className="pb-2 pr-4 whitespace-nowrap">Teammates</th><th className="pb-2 pr-4 text-right tabular-nums whitespace-nowrap">Qualifying</th><th className="pb-2 text-right tabular-nums whitespace-nowrap">Race</th></tr></thead><tbody>{teammateHeadToHeads.map((pair) => {
+        const Score = ({ scores }) => <span className="tabular-nums"><strong className={scores[0] > scores[1] ? 'text-white' : ''}>{scores[0]}</strong> – <strong className={scores[1] > scores[0] ? 'text-white' : ''}>{scores[1]}</strong></span>;
+        return <tr key={`${pair.constructorId}-${pair.first.driverId}-${pair.second.driverId}`} className="border-t border-gray-900"><td className="py-2 pr-4 text-white whitespace-nowrap"><span className="flex items-center gap-2"><TeamRail constructorId={pair.constructorId} /><span>{pair.first.driverName} <span className="text-gray-500">/</span> {pair.second.driverName}</span></span></td><td className="pr-4 text-right tabular-nums"><Score scores={pair.qualifying} /></td><td className="text-right tabular-nums"><Score scores={pair.race} /></td></tr>;
+      })}</tbody></table></div> : <p className="text-sm text-gray-500">No teammate pair has raced together in a cached round yet.</p>) : <><div className="flex flex-wrap gap-3 mb-4"><Select value={firstDriver} onChange={setFirstDriver}>{drivers.map((driver) => <option value={driver.id} key={driver.id}>{driver.name}</option>)}</Select><Select value={secondDriver} onChange={setSecondDriver}>{drivers.map((driver) => <option value={driver.id} key={driver.id}>{driver.name}</option>)}</Select></div>{headToHead.length ? <><p className="text-sm text-gray-300 mb-3"><span className="text-white font-bold">{drivers.find((driver) => driver.id === firstDriver)?.name}: {h2hWins.first}</span> · <span className="text-white font-bold">{drivers.find((driver) => driver.id === secondDriver)?.name}: {h2hWins.second}</span> race finishes ahead</p><div className="space-y-2">{headToHead.map((race) => <div key={race.round} className="text-sm flex justify-between border-t border-gray-900 pt-2"><span className="text-gray-400">R{race.round} · {race.raceName}{race.teammates ? ' · teammates' : ''}</span><span className="text-white tabular-nums">{race.first.positionText} — {race.second.positionText}</span></div>)}</div></> : <p className="text-sm text-gray-500">These drivers haven't both raced in a cached round this season.</p>}</>}
     </CollapsibleSection>
 
     <CollapsibleSection title="Track history">

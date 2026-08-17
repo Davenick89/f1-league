@@ -321,7 +321,11 @@ function normalizeNewsItems(items, sourceName) {
   // out of scope here.
   const byLink = new Map();
   for (const item of items) {
-    const title = plainText(item.title);
+    const originalTitle = plainText(item.title);
+    // Feed-category labels such as "| Brief" are metadata, but a long tail
+    // after a pipe can be meaningful headline text. Remove only one short,
+    // final segment and retain the original whenever it would empty the title.
+    const title = originalTitle.replace(/\s*\|\s*[^|]{1,30}\s*$/, '').trim() || originalTitle;
     const link = item.link;
     if (!title || !/^https?:\/\//i.test(link || "")) continue;
     const parsedDate = new Date(item.isoDate || item.pubDate || item.published);
