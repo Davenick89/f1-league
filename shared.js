@@ -29,6 +29,36 @@ setPersistence(auth, browserLocalPersistence).catch(e => console.error("Auth err
 export const db = initializeFirestore(app, { localCache: persistentLocalCache() });
 export const functions = getFunctions(app);
 
+// Shared display-layer statistics derived from the cached Jolpica rounds.
+// Keeping these here makes every consumer use the same definitions for the
+// season summary and attrition-adjusted grid-to-finish metric.
+export function summarizeDriverSeason(drivers, rounds) {
+  return drivers.map((driver) => {
+    const results = rounds.flatMap((round) => round.drivers?.filter((entry) => entry.driverId === driver.id) || []);
+    return {
+      ...driver,
+      wins: results.filter((result) => result.position === 1).length,
+      podiums: results.filter((result) => result.position && result.position <= 3).length,
+      dnfs: results.filter((result) => result.dnf).length,
+    };
+  });
+}
+
+export function gridToFinishDeltas(summary, rounds) {
+  return summary.map((driver) => {
+    const perRound = rounds.map((round) => {
+      const own = round.drivers?.find((entry) => entry.driverId === driver.id);
+      if (!own || own.position === null || !Number.isFinite(own.grid)) return null;
+      const attritionAhead = (round.drivers || []).filter((entry) =>
+        entry.dnf && Number.isFinite(entry.grid) && entry.grid < own.grid
+      ).length;
+      return (own.grid - own.position) - attritionAhead;
+    }).filter((value) => value !== null);
+    const total = perRound.reduce((sum, value) => sum + value, 0);
+    return { ...driver, delta: total, average: perRound.length ? total / perRound.length : 0 };
+  }).sort((a, b) => b.average - a.average);
+}
+
 // Shared browser connectivity state. Firestore listeners independently report
 // cached snapshots; this hook is for UI that must block writes while offline.
 export function useOnlineStatus() {

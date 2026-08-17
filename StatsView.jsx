@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { Line, LineChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { db, functions } from './shared.js';
+import { db, functions, gridToFinishDeltas, summarizeDriverSeason } from './shared.js';
 
 // Real 2026-grid team colors, keyed by Jolpica's constructorId, so the
 // points-progression chart reads at a glance the way real F1 graphics do.
@@ -182,22 +182,8 @@ export default function StatsView({ series }) {
     if (teammates.length < 2) return undefined;
     return teammates[0].id === entry.id ? undefined : '6 4';
   };
-  const summary = useMemo(() => drivers.map((driver) => {
-    const results = rounds.flatMap((round) => round.drivers?.filter((entry) => entry.driverId === driver.id) || []);
-    return { ...driver, wins: results.filter((result) => result.position === 1).length, podiums: results.filter((result) => result.position && result.position <= 3).length, dnfs: results.filter((result) => result.dnf).length };
-  }), [drivers, rounds]);
-  const deltas = useMemo(() => summary.map((driver) => {
-    const perRound = rounds.map((round) => {
-      const own = round.drivers?.find((entry) => entry.driverId === driver.id);
-      if (!own || own.position === null || !Number.isFinite(own.grid)) return null;
-      const attritionAhead = (round.drivers || []).filter((entry) =>
-        entry.dnf && Number.isFinite(entry.grid) && entry.grid < own.grid
-      ).length;
-      return (own.grid - own.position) - attritionAhead;
-    }).filter((value) => value !== null);
-    const total = perRound.reduce((sum, value) => sum + value, 0);
-    return { ...driver, delta: total, average: perRound.length ? total / perRound.length : 0 };
-  }).sort((a, b) => b.average - a.average), [summary, rounds]);
+  const summary = useMemo(() => summarizeDriverSeason(drivers, rounds), [drivers, rounds]);
+  const deltas = useMemo(() => gridToFinishDeltas(summary, rounds), [summary, rounds]);
   // FIX (post-buildplan-stats audit): the spec's frontend requirement is
   // "select two drivers, compare current-season results" — any two drivers,
   // not only when they happened to share a constructor that round. The

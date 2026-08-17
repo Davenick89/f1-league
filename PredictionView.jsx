@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { collection, doc, getDoc, setDoc, onSnapshot, serverTimestamp, Timestamp, writeBatch } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import { Edit, Info, Lock, X } from 'lucide-react';
-import { db, functions, F1_DRIVERS, formatLockTimeIST, getDisplayName, getPredictionLockTime, getPredictionOpenTime, getValidatedApiSessionStr, track, useF1ApiSchedule, useOnlineStatus, waitForServerAck } from './shared.js';
+import { db, functions, F1_DRIVERS, formatLockTimeIST, getDisplayName, getPredictionLockTime, getPredictionOpenTime, getValidatedApiSessionStr, gridToFinishDeltas, summarizeDriverSeason, track, useF1ApiSchedule, useOnlineStatus, waitForServerAck } from './shared.js';
 import { rfDistance, rfPoints, scoreRace } from './scoring.js';
 import { validatePredictions } from './validation.js';
 
@@ -163,6 +164,132 @@ function InfoBtn({ fieldKey, onOpen }) {
     >
       <Info size={13} />
     </button>
+  );
+}
+
+// Read-only, best-effort form guide. It deliberately owns no prediction
+// state and never exposes a loading/error UI, so an unavailable stats cache
+// leaves the prediction form exactly as it was.
+function RaceInsightPanel({ series, currentRound }) {
+  const [stats, setStats] = useState(null);
+  const [open, setOpen] = useState(() => window.matchMedia('(min-width: 768px)').matches);
+  const [circuit, setCircuit] = useState(null);
+  const [histories, setHistories] = useState({});
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      doc(db, 'driverStats', series),
+      (snapshot) => setStats(snapshot.exists() ? snapshot.data() : null),
+      () => setStats(null),
+    );
+    return () => unsubscribe();
+  }, [series]);
+
+  // The current round is not in the completed-round cache, so obtain its
+  // circuit from Jolpica's season schedule. Failure intentionally means no
+  // track-history calls or line items; season facts remain available.
+  useEffect(() => {
+    if (!stats?.season) return undefined;
+    let cancelled = false;
+    setCircuit(null);
+    fetch(`https://api.jolpi.ca/ergast/f1/${stats.season}.json?limit=100`)
+      .then((response) => { if (!response.ok) throw new Error('Schedule unavailable'); return response.json(); })
+      .then((data) => {
+        const race = (data?.MRData?.RaceTable?.Races || []).find((entry) => Number(entry.round) === Number(currentRound));
+        if (!cancelled && race?.Circuit?.circuitId) {
+          setCircuit({ id: race.Circuit.circuitId, name: race.Circuit.circuitName });
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [stats?.season, currentRound]);
+
+  const rounds = stats?.rounds || [];
+  const latestRound = rounds[rounds.length - 1];
+  const driverDetails = new Map();
+  rounds.forEach((round) => round.drivers?.forEach((driver) => {
+    if (!driverDetails.has(driver.driverId)) driverDetails.set(driver.driverId, driver);
+  }));
+  const drivers = (latestRound?.driverStandings || []).slice(0, 8)
+    .map((standing) => {
+      const detail = driverDetails.get(standing.id);
+      return detail && { id: standing.id, name: standing.name || detail.driverName, constructorId: detail.constructorId };
+    })
+    .filter(Boolean);
+  const summary = summarizeDriverSeason(drivers, rounds);
+  const movements = new Map(gridToFinishDeltas(summary, rounds).map((driver) => [driver.id, driver]));
+
+  // Populate each driver independently as its cached/on-call result arrives.
+  // A rejected call is intentionally indistinguishable from no history.
+  useEffect(() => {
+    if (!circuit?.id || !drivers.length) return undefined;
+    let cancelled = false;
+    setHistories({});
+    const getHistory = httpsCallable(functions, 'getDriverCircuitHistory');
+    drivers.forEach((driver) => {
+      getHistory({ series, driverId: driver.id, circuitId: circuit.id })
+        .then((result) => {
+          if (!cancelled && result.data?.races?.length) {
+            setHistories((current) => ({ ...current, [driver.id]: result.data }));
+          }
+        })
+        .catch(() => {});
+    });
+    return () => { cancelled = true; };
+  }, [series, circuit?.id, drivers.map((driver) => driver.id).join(',')]);
+
+  if (!rounds.length || !drivers.length) return null;
+
+  const historyFact = (history) => {
+    if (!history?.races?.length) return null;
+    const classified = history.races.filter((race) => Number.isFinite(race.position));
+    const best = classified.reduce((bestRace, race) => !bestRace || race.position < bestRace.position ? race : bestRace, null);
+    return best ? `best P${best.position} (${best.season}), ${history.races.length} starts` : `${history.races.length} starts`;
+  };
+
+  return (
+    <section className="bg-gray-900 border border-blue-700/40 rounded-lg p-4 sm:p-6">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="w-full flex items-center justify-between gap-3 text-left"
+      >
+        <div>
+          <h3 className="text-xl font-bold text-white">Race insight</h3>
+          <p className="text-xs text-gray-500 mt-1">Season facts through round {latestRound.round}</p>
+        </div>
+        <span className={`text-gray-400 transition-transform ${open ? '' : '-rotate-90'}`}>▼</span>
+      </button>
+      {open && (
+        <div className="mt-5 grid grid-cols-1 xl:grid-cols-2 gap-3">
+          {drivers.map((driver) => {
+            const season = summary.find((entry) => entry.id === driver.id);
+            const recentRounds = rounds.slice(-3);
+            const recentPoints = recentRounds.reduce((total, round) => total + (round.drivers?.find((entry) => entry.driverId === driver.id)?.points || 0), 0);
+            const seasonPoints = rounds.reduce((total, round) => total + (round.drivers?.find((entry) => entry.driverId === driver.id)?.points || 0), 0);
+            const averagePoints = seasonPoints / rounds.length;
+            const recentAverage = recentPoints / recentRounds.length;
+            const formComparison = recentAverage > averagePoints ? 'above' : recentAverage < averagePoints ? 'below' : 'at';
+            const grids = rounds.slice(-5).map((round) => round.drivers?.find((entry) => entry.driverId === driver.id)?.grid).filter(Number.isFinite);
+            const movement = movements.get(driver.id);
+            const trackFact = historyFact(histories[driver.id]);
+            return (
+              <article key={driver.id} className="rounded-lg bg-black/25 border border-gray-800 p-4">
+                <h4 className="font-bold text-white">{driver.name}</h4>
+                <ul className="mt-2 space-y-1 text-sm text-gray-300">
+                  <li>{recentPoints} pts in last {recentRounds.length} rounds ({formComparison} season avg {averagePoints.toFixed(1)}/round)</li>
+                  {grids.length > 0 && <li>Avg grid P{(grids.reduce((total, grid) => total + grid, 0) / grids.length).toFixed(1)} over last {grids.length} rounds</li>}
+                  <li>{season.wins} wins · {season.podiums} podiums · {season.dnfs} DNFs this season</li>
+                  {movement && <li>Grid-to-finish movement: {movement.average > 0 ? '+' : ''}{movement.average.toFixed(1)} avg / classified race</li>}
+                  {trackFact && <li>{circuit.name}: {trackFact}</li>}
+                </ul>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -631,6 +758,8 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
           </button>
         )}
       </div>
+
+      <RaceInsightPanel series="f1" currentRound={currentRound} />
 
       {/* Predictions Form */}
       <div className="bg-gray-900 border border-red-600/50 rounded-lg p-6">
