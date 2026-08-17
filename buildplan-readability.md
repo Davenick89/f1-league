@@ -49,36 +49,65 @@ from `NewsView.jsx`** ("Show all 116" / `MOST_RELEVANT_PREVIEW_COUNT`) so
 the two views behave consistently — same control style, same wording
 shape. Don't invent a new interaction.
 
-## 4. Replace grid-to-finish with teammate head-to-head — `StatsView.jsx`
+## 4. Add teammate head-to-head, and consolidate the layout
 
-**Remove the "Grid-to-finish movement" section entirely.** It's a proxy
-metric that doesn't map to how people think about races, and the
-attrition adjustment made it more accurate without making it more
-meaningful.
+Two goals at once: add the teammate comparison, and **end up with fewer
+sections than today** rather than a sixth stacked panel.
 
-Replace it with a **teammate head-to-head** table — same car, same
-package, which is the comparison that actually settles arguments:
+Today there are five collapsible sections: points progression,
+grid-to-finish movement, wins/podiums/DNFs, head-to-head (any two
+drivers), track history. Target shape is **four**:
 
+### 4a. Merge the two per-driver tables into one "Season form" table
+
+Grid-to-finish movement and wins/podiums/DNFs are both per-driver season
+tallies, rendered as two separate 22-row tables. Merge them into one:
+
+| Driver | Wins | Podiums | DNFs | Gained (total) | Gained (avg) |
+
+Same data, same computations (`summarizeDriverSeason()` and
+`gridToFinishDeltas()` from `shared.js` — reuse both, don't reimplement).
+One table of 22 rows instead of two, so this is a net density *reduction*
+even though no metric was dropped. Keep the existing `overflow-x-auto`
+wrapper — six columns will scroll horizontally on a phone, which is the
+pattern these tables already use.
+
+**Grid-to-finish stays** — it was corrected for attrition and is worth
+keeping for anyone interested; it just doesn't need a section of its own.
+Keep the existing caption explaining the attrition adjustment ("not a
+count of on-track overtakes") attached to those two columns, since that
+caveat is what makes the number honest.
+
+### 4b. New teammate head-to-head, merged into the existing comparison section
+
+Combine the new teammate table and the existing any-two-drivers picker
+into **one "Head-to-head" section with two modes** (a segmented control:
+"Teammates" / "Any two drivers"). Defaults to Teammates, since that's the
+comparison with no setup — it's already answered when you open it.
+
+Teammate mode:
 - For each round, group that round's drivers by `constructorId`. Where a
-  constructor has exactly two drivers that round, compare them:
+  constructor fielded exactly two drivers that round, compare them:
   - **Qualifying**: lower `grid` wins the round.
-  - **Race**: lower `position` wins. Skip the race comparison for any
-    round where either driver has `position === null` (DNF/DNS) — neither
-    "won" a comparison that didn't happen. Do **not** count a DNF as a
-    loss.
-- Render one row per current teammate pair: driver names, the qualifying
-  tally (e.g. "7 – 4"), and the race tally. Bold the leading side of each
-  tally.
-- Use both drivers' shared team colour as the row's rail (section 2).
-- Handle mid-season driver changes gracefully: pair by whoever actually
-  raced together in each round, and if a constructor had more than two
-  drivers across the season, show the pairing with the most shared rounds
-  rather than erroring or guessing.
+  - **Race**: lower `position` wins. **Skip the race comparison entirely
+    for any round where either driver has `position === null`** (DNF/DNS)
+    — neither driver "won" a comparison that didn't happen. Do **not**
+    count a DNF as a loss.
+- One row per teammate pair: both names, the qualifying tally ("7 – 4"),
+  and the race tally. Bold the leading side of each.
+- Row rail uses the pair's shared team colour (section 2).
+- Handle mid-season changes gracefully: pair by who actually raced
+  together each round, and where a constructor used more than two drivers
+  across the season, show the pairing with the most shared rounds rather
+  than erroring or guessing.
 
-Keep `gridToFinishDeltas()` in `shared.js` — **do not delete it.**
-`PredictionView.jsx`'s Race Insight panel imports it and uses it there,
-where "positions gained" reads naturally in a single-driver sentence.
-This section only removes the Stats *table*, not the shared helper.
+"Any two drivers" mode keeps today's behaviour exactly — same pickers,
+same per-round list, same `teammates` flag annotation.
+
+**Keep `gridToFinishDeltas()` in `shared.js` regardless** —
+`PredictionView.jsx`'s Race Insight panel imports it, and it reads
+naturally there in a single-driver sentence. Nothing in this round should
+touch that helper's signature or behaviour.
 
 ## 5. Group driver toggles by team — `StatsView.jsx`
 
@@ -147,23 +176,30 @@ Keep the existing invalid-date guard (currently returns "Date unavailable")
    `firestore.rules` and all Cloud Functions other than
    `normalizeNewsItems` are untouched — this is otherwise a
    presentation-only round.
-3. **Confirm `gridToFinishDeltas()` still exists in `shared.js` and
-   `PredictionView.jsx`'s insight panel still renders its movement line.**
-   Section 4 removes a table, not the shared helper — regressing the
-   insight panel would be the easy mistake here.
-4. Verify the teammate tallies by hand against cached data for at least
+3. **Confirm `gridToFinishDeltas()` and `summarizeDriverSeason()` are
+   unchanged in `shared.js`, and `PredictionView.jsx`'s insight panel
+   still renders its movement line.** Section 4a merges two tables that
+   consume those helpers; it must not alter the helpers themselves.
+   Regressing the insight panel is the easy mistake in this round.
+4. **Confirm the section count actually went down** — five sections
+   before, four after (progression / season form / head-to-head /
+   track history). If it's still five or more, the consolidation in
+   section 4 wasn't done as specced.
+5. Verify the teammate tallies by hand against cached data for at least
    one pair — confirm DNF rounds are excluded from the race tally rather
-   than counted as losses.
-5. Confirm the title-stripping regex doesn't damage legitimate headlines
+   than counted as losses, and that qualifying and race tallies can
+   legitimately differ in total (a pair can have 11 qualifying
+   comparisons but only 9 race ones).
+6. Confirm the title-stripping regex doesn't damage legitimate headlines
    containing a pipe — test against a title with a long tail after `|`
    and confirm it's left alone.
-6. Confirm relative timestamps read correctly across boundaries (minutes,
+7. Confirm relative timestamps read correctly across boundaries (minutes,
    hours, yesterday, several days, over a week) and that an invalid
    `pubDate` still degrades gracefully.
-7. Confirm Select All / Clear still work on the regrouped driver toggles,
+8. Confirm Select All / Clear still work on the regrouped driver toggles,
    including that Clear actually clears (previously-fixed bug).
-8. `npm run build` — confirm success, no bundle-size surprise.
-9. Exercise live via `security/e2e-test-signin.cjs` + Playwright at both
+9. `npm run build` — confirm success, no bundle-size surprise.
+10. Exercise live via `security/e2e-test-signin.cjs` + Playwright at both
    desktop and phone viewports. Screenshot Stats and News at both sizes
    and send them over — this round is judged by eye, so the screenshots
    are part of the deliverable, not an optional extra.
