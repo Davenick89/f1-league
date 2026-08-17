@@ -23,7 +23,7 @@ A React single-page app for running an F1 predictions league among friends. Play
 | File | Purpose |
 |---|---|
 | `F1League.jsx` | Root shell — ~1140 lines. Auth, routing between views, global state. Lazy-loads the 10 view files below (see structure below) |
-| `shared.js` | Firebase init, `F1_SCHEDULE_2026`, lock-time helpers, `useF1ApiSchedule`, `useOnlineStatus`, `saveRoundScores`, `waitForServerAck` |
+| `shared.js` | Firebase init, `F1_SCHEDULE_2026`, lock-time helpers, `useF1ApiSchedule`, `useOnlineStatus`, `saveRoundScores`, `waitForServerAck`, `summarizeDriverSeason`/`gridToFinishDeltas` (shared season-stats math, imported by both `StatsView.jsx` and `PredictionView.jsx`'s Race Insight panel so the two can't drift) |
 | `scoring.js` | Canonical scoring engine — `scoreRace()`, `rfDistance()`, `rfPoints()` |
 | `firestore.rules` | Security rules — all auth/lock logic lives here |
 | `functions/index.js` | Cloud Functions (v2, scheduled) — see below |
@@ -37,7 +37,9 @@ A React single-page app for running an F1 predictions league among friends. Play
 | `buildplan.md` | Spec doc for the Track D (PWA) build — implemented, kept for reference |
 | `buildplan-stats.md` | Spec doc for the Driver/Team Performance Stats (v1) build — implemented, kept for reference |
 | `buildplan-news.md` | Spec doc for the RSS News Tab (v2) build — implemented, kept for reference |
-| `buildplan-news-ai.md` | Spec doc for the AI-summarized digest (v3) — **not built, explicitly gated** until v2 has been live and stable for a while. Do not build from this without re-confirming that gate still holds |
+| `buildplan-news-ai.md` | Original spec for an LLM-generated insight panel (v3) — **parked, not built.** Its own section 0 terms gate found all 8 News sources prohibit LLM-derivative use (verbatim clauses recorded at the top of the file). Kept as a record of that research so it's never re-run; v3 shipped a different way instead — see `buildplan-insight-panel.md` |
+| `buildplan-insight-panel.md` | Spec doc for the Race Insight Panel (v3) as actually built — implemented and deployed. See "Race Insight Panel" below |
+| `buildplan-pwa-fixes.md` | Spec doc for 5 low-priority PWA-audit fixes — implemented and deployed, kept for reference |
 | `.claude/launch.json` | Dev server configs for Claude Code browser preview |
 | `security/INCIDENT_RESPONSE.md` | Rollback procedures, deploy-phase checklists, backup/restore commands |
 | `security/backup.sh`, `security/integrity-check.cjs` | Firestore backup and document-count integrity check |
@@ -47,7 +49,7 @@ There is no test suite (no test runner configured in `package.json` or `function
 
 ### F1League.jsx structure
 Code-split (Track C) — no router, view switching is done via local state, and 11 views are `React.lazy`-loaded from their own files. Top-level pieces:
-`LandingPage` → `SetNicknameModal` → `F1League` (root component, holds most state/handlers) → lazy: `AdminWizard.jsx` (league creation) → `LeaderboardView.jsx` (+ `UserStatsCard` / `PlayerSummaryModal`) → `PredictionView.jsx` (the per-race prediction form) → `SeasonBoardView.jsx` → `HowToPlayView.jsx` → `ResultsView.jsx` (admin result entry + scoring trigger) → `StatsView.jsx` (Driver/Team Performance Stats — global, not group-scoped) → `NewsView.jsx` (RSS News Tab — global, not group-scoped) → `InvitesView.jsx` (+ `LeagueSettingsCard`) → `CalendarView.jsx` → `AuditView.jsx`. Shared helpers (Firebase init, schedule data, lock-time math, hooks) live in `shared.js`, imported by all of the above.
+`LandingPage` → `SetNicknameModal` → `F1League` (root component, holds most state/handlers) → lazy: `AdminWizard.jsx` (league creation) → `LeaderboardView.jsx` (+ `UserStatsCard` / `PlayerSummaryModal`) → `PredictionView.jsx` (the per-race prediction form, plus the read-only `RaceInsightPanel` component above it — see "Race Insight Panel" below) → `SeasonBoardView.jsx` → `HowToPlayView.jsx` → `ResultsView.jsx` (admin result entry + scoring trigger) → `StatsView.jsx` (Driver/Team Performance Stats — global, not group-scoped) → `NewsView.jsx` (RSS News Tab — global, not group-scoped) → `InvitesView.jsx` (+ `LeagueSettingsCard`) → `CalendarView.jsx` → `AuditView.jsx`. Shared helpers (Firebase init, schedule data, lock-time math, hooks) live in `shared.js`, imported by all of the above.
 
 Race schedule/session times come from the public **Jolpica Ergast API** (`https://api.jolpi.ca/ergast/f1/{season}.json`), fetched client-side, with an hourly Cloud Function (`refreshScheduleCache`) caching validated overrides to `/system/scheduleCache` (OpenF1 as a backup source if Jolpica is unreachable) — see `F1_SCHEDULE_2026` in `shared.js`/`functions/index.js` for the hardcoded fallback.
 
@@ -73,6 +75,7 @@ All are scheduled (`onSchedule`) except the callable/request endpoints:
 - **Install**: manifest + icon set (`public/icons/`, dark bg/red-600 accent) generated via `scripts/generate-icons.js`.
 - **Updates**: `registerType: 'prompt'` (not `autoUpdate`) — a new service worker install-and-waits; the app shows a "tap to refresh" banner rather than force-reloading mid-session. `sw-src/firebase-messaging-sw.js` has an explicit `message` listener for `SKIP_WAITING` — `vite-plugin-pwa`'s `injectManifest` strategy (unlike `generateSW`) does **not** auto-inject one, so without it `updateSW(true)` posts a message nobody's listening for and the "tap to refresh" banner silently does nothing.
 - See `buildplan.md` for the full spec this implements, including the env-injection ordering fix (`scripts/inject-sw-env.js` must run *after* `vite-plugin-pwa`'s `injectManifest` output, hence the postbuild script + `firebase.json` `predeploy` hook rather than a Vite plugin hook).
+- **5 audit fixes shipped 2026-08-17** (`buildplan-pwa-fixes.md`, see the dated update at the bottom for full validation detail): `CalendarView.jsx`'s `lastSyncedAt` no longer advances on a cache-served read (mirrors `LeaderboardView.jsx`'s existing `metadata.fromCache` check); `icon-512-maskable.png` is now a genuinely distinct, padded (60% safe-zone) variant instead of being byte-identical to `icon-512.png`; `vite.config.js`'s `globPatterns` now precaches the icon set + manifest, fixing an offline-load favicon 404; `index.html` carries the standard `mobile-web-app-capable` tag alongside the legacy Apple one. `scripts/inject-sw-env.js` throws on a missing/blank `VITE_FIREBASE_*` var, though **live-tested this only fires when the var is missing from every `loadEnv`-merged source** (`.env` + `.env.production` + `.env.local` + `.env.production.local`) — since this repo's dev `.env` defines the same keys as `.env.production`, a var missing from *production* config alone silently falls back to the dev file's value rather than throwing. Narrower protection than the spec intended; not yet fixed.
 
 ### Driver/Team Performance Stats (Stats v1)
 Global season stats (not scoped to any league) — points progression, qual-vs-race delta, wins/podiums/DNFs, head-to-head, track history. Spec in `buildplan-stats.md`; view is `StatsView.jsx`, nav entry between Results and Invite.
@@ -93,6 +96,16 @@ Global (not scoped to any league) — curated headlines + ≤200-char excerpts +
 - **ESPN excluded** — no working feed found under any URL pattern tried (403s, empty responses).
 - **Sky Sports excluded** — a real, live-caught bug: their feed URL parses as valid RSS with real items, but it's Sky's general all-sports feed, not F1-specific (no dedicated F1 feed exists under any pattern tried). Filled the News tab with boxing/tennis/football before this was caught by actually reading the rendered content, not just checking that the feed parsed. If re-adding any source in the future, verify topical relevance live, not just feed validity.
 - **Season + relevance filtering**: items are bucketed by `pubDate`'s calendar year into a season dropdown (defaulting to the current season, derived from `F1_SCHEDULE_2026`'s own year — the RSS cache has no other concept of "season"). Within the selected season, a "Most relevant" section shows everything published since the last completed race (via `getCurrentRound()`/`F1_SCHEDULE_2026`) — this single date window covers both post-race reaction and next-race build-up/penalties/rule news without fragile per-article keyword classification. Only the 15 most recent relevant items render by default (`MOST_RELEVANT_PREVIEW_COUNT`) with a "Show all" expander — the date window alone wasn't short enough (8 active sources over a ~2-week race gap is 100+ items). Everything older than the last race is collapsed behind its own "Show N earlier articles" toggle.
+
+### Race Insight Panel (v3)
+Shipped 2026-08-17, deterministic — **not** the LLM design originally specced in `buildplan-news-ai.md` (parked; see that file's top section and the RSS News Tab entries above for why — every one of the 8 News sources' terms prohibits LLM-derivative use). Spec in `buildplan-insight-panel.md`; implementation is the `RaceInsightPanel` component inside `PredictionView.jsx`, rendered directly above the prediction form (not a new tab or lazy-loaded view — it has to load with the form itself).
+- **No new backend** — reads only `driverStats/{series}` and `getDriverCircuitHistory`, both pre-existing from Stats v1. No new Cloud Function, Firestore collection, or rules block.
+- **Shows facts, never recommendations** — recent form (points over last 3 rounds vs season average), average qualifying grid (last 5 rounds), season wins/podiums/DNFs, grid-to-finish movement, and lazy per-driver track history at the round's circuit. Never renders a pick or a ranking judgment, by design — the boundary that keeps this feature out of the trust problems an LLM version would have carried.
+- **Shared math with StatsView.jsx**: `summarizeDriverSeason()`/`gridToFinishDeltas()` (`shared.js`) are the same functions both views call — wins/podiums/DNFs and grid-to-finish movement are guaranteed to agree between the two, verified live for all 8 rendered drivers rather than just assumed from the shared import.
+- **Completely severable from the prediction form**: if `driverStats/{series}` is missing, empty, or fails to load, the panel renders nothing at all — no error state, no spinner, no layout shift. Verified live by pointing the panel's read at a nonexistent doc ID on an isolated Firebase Hosting preview channel (never touching production data) and confirming the form and Save button behave identically either way.
+- **Track history degrades silently, verified against a real failure, not a simulated one**: on first load for a freshly-live round, a burst of parallel first-time driver×circuit lookups genuinely hit Jolpica's rate limit (3 of 8 calls failed live with a real `HttpsError("unavailable")` → 503, visible in console) — the panel caught each independently and rendered every other fact for those drivers, just omitting the track-history line. Same class of risk already documented in "Driver/Team Performance Stats" above for `refreshDriverStatsCache`'s first-ever backfill burst — not something this feature introduced.
+- **Mobile**: collapsed by default, expanded on desktop (`window.matchMedia('(min-width: 768px)')` at mount) — deliberately different from the mobile-nav sidebar's `lg` (1024px) breakpoint elsewhere in the app; a soft inconsistency in the 768–1024px tablet range, not something either spec called out, not fixed.
+- Deployed: hosting only (reads pre-existing data/functions, nothing to redeploy on the backend).
 
 ---
 
@@ -285,11 +298,15 @@ After Codex finishes, always:
 
 ## Session status as of 2026-08-07 (for a fresh Claude Code session picking this up)
 
-**Everything below is deployed and committed** (`origin/main` @ `9fd283e`).
-Nothing mid-flight — read this section (oldest history first, dated
-updates at the bottom are the most recent — **read those last, they
-supersede anything earlier that they touch**), check `git log`, then pick
-up with whatever's still flagged open in the latest dated update rather
+**Everything below is deployed and committed.** This section's own base
+snapshot is from 2026-08-07 (`origin/main` @ `9fd283e` at the time) —
+**the commit reference itself goes stale every time this file isn't
+updated alongside a ship, so don't trust it; trust the dated Update
+sections instead.** Nothing mid-flight — read this section (oldest
+history first, dated updates at the bottom are the most recent — **read
+those last, they supersede anything earlier that they touch**), check
+`git log` for the true current HEAD, then pick up with whatever's still
+flagged open in the latest dated update (currently 2026-08-17) rather
 than assuming anything here needs redoing.
 
 **Fully complete and deployed:**
@@ -658,14 +675,15 @@ follow-ups). Firestore integrity check clean throughout.
     `buildplan-news-ai.md` — **do not re-run this research**, it's done.
     These sources are unaffected in the News tab; only LLM-derivative use
     is barred, which is a separate permission from v2's aggregation use.
-  - **What v3 became**: `buildplan-insight-panel.md` — the same panel in
-    the same place (`PredictionView.jsx`), built deterministically from
-    v1's stats data (Jolpica, no terms question) through fixed templates.
-    No LLM, no API cost, no hallucination risk, nothing to label as
-    AI-generated. Deliberately shows facts only, never "pick X".
-    Needs no new Cloud Function, collection, or rules block — everything
-    it reads (`driverStats/{series}`, `getDriverCircuitHistory`) already
-    exists and is already client-readable.
+  - **What v3 became — SHIPPED 2026-08-17**: `buildplan-insight-panel.md`
+    — the same panel in the same place (`PredictionView.jsx`), built
+    deterministically from v1's stats data (Jolpica, no terms question)
+    through fixed templates. No LLM, no API cost, no hallucination risk,
+    nothing to label as AI-generated. Deliberately shows facts only,
+    never "pick X". No new Cloud Function, collection, or rules block —
+    confirmed by zero diff on `functions/index.js`/`firestore.rules` at
+    ship time. See "Race Insight Panel (v3)" above for the shipped shape
+    and the dated update at the bottom for the full validation record.
   - **What could unpark the LLM version**: a corpus that clears on terms.
     Never investigated — FIA published documents (stewards' decisions,
     technical directives) and open weather APIs for the race location.
@@ -720,3 +738,93 @@ link-only, not fuzzy cross-source matching. Deployed (functions only).
   again, use a dedicated orphan branch (rewritten/force-pushed each round,
   not accumulated) rather than `main`; for one-off sharing, prefer
   sending the files directly over committing them at all.
+
+### Update — 2026-08-17: Race Insight Panel (v3) shipped; 5 PWA audit fixes shipped
+
+**Section 0 terms gate run, all 8 News sources failed.** Before writing
+any v3 code, checked whether each of the 8 `NEWS_SOURCES`' terms permit
+using their content as LLM input (a different permission from v2's
+aggregation-plus-link-out use, which was already verified acceptable for
+all 8). Read actual terms pages live, not assumed — same discipline that
+caught the Sky Sports content bug and the Formula1.com restriction. Every
+source failed: The Guardian and BBC Sport explicitly bar AI/machine-
+learning/text-and-data-mining use of their content; GrandPrix.com's terms
+bar creating a derivative work; Autosport, Motorsport.com, and The Race
+are personal/non-commercial-use-only (Motorsport Network's shared
+template for the first two); F1Technical and RaceFans publish no terms of
+use at all but block AI crawlers in `robots.txt` (RaceFans names
+`ClaudeBot` directly). Verbatim clauses recorded at the top of
+`buildplan-news-ai.md`, now parked rather than deleted — this research is
+done and should never be repeated. All 8 sources are unaffected in the
+News tab itself; only the LLM-derivative permission is barred.
+
+**v3 shipped anyway, rescoped to deterministic** — `buildplan-insight-
+panel.md`: the same panel, same place (`PredictionView.jsx`), grounded
+entirely in v1's Jolpica stats data (no terms question) through fixed
+templates instead of an LLM. See "Race Insight Panel (v3)" above for the
+shipped shape. Same Codex-builds/Claude-validates pattern as v1/v2:
+
+- **No new backend, confirmed not assumed** — zero diff on
+  `functions/index.js`/`firestore.rules` after the build.
+- **Severability tested live, not simulated**: deployed to an isolated
+  Firebase Hosting preview channel (never touched production data),
+  temporarily pointed the panel's read at a nonexistent `driverStats` doc
+  ID, and confirmed the prediction form and Save button work identically
+  with no panel rendered — no error state, no layout shift.
+- **Numbers cross-checked live against `StatsView.jsx`** for all 8
+  rendered drivers (wins/podiums/DNFs, grid-to-finish movement) — exact
+  matches, now structurally guaranteed since both views import
+  `summarizeDriverSeason()`/`gridToFinishDeltas()` from `shared.js`
+  instead of each computing their own copy.
+- **Track history's silent-degrade path hit for real**: a live burst of
+  8 parallel first-time driver×circuit lookups for the round hit
+  Jolpica's rate limit on 3 of 8 (real `HttpsError("unavailable")` → 503
+  in console) — the panel correctly rendered every other fact for those
+  drivers, just omitting the track-history line. Same known risk class as
+  `refreshDriverStatsCache`'s backfill burst (see "Driver/Team Performance
+  Stats" above) — not a new problem this feature introduced.
+- Mobile collapsed-by-default / desktop expanded confirmed, plus a full
+  Edit+Save round-trip at both viewport sizes, zero regressions.
+
+Deployed: hosting only. Shipped well inside the Aug 19 validation buffer
+set for the Aug 21 Zandvoort lock — see `buildplan-insight-panel.md`'s own
+timing note for why that deadline existed.
+
+**Separately, the 5 low-priority PWA audit fixes also shipped this
+session** (`buildplan-pwa-fixes.md`, findings from the 2026-08-14 audit) —
+see "PWA support" above for the shipped detail on each. Two items
+surfaced real nuances during live validation, worth recording here since
+they're not simply "fixed, done":
+- **The env-var guard's protection is narrower than intended.** Removing
+  a `VITE_FIREBASE_*` var from `.env.production` alone did **not** fail
+  the build — Vite's `loadEnv` merges the base `.env` (dev config) as a
+  fallback, and since that file defines the same keys, the guard never
+  saw a "missing" var. Confirmed the guard does work when a var is
+  missing from every merged source (`.env` *and* `.env.production`
+  together). Both files were restored to their exact original contents
+  immediately after each test. Not fixed further this round — flagged as
+  a real but lower-priority gap.
+- **The `lastSyncedAt` fix's logic is correct** (verified by code read
+  against the established `LeaderboardView.jsx` `metadata.fromCache`
+  pattern it was modeled on) **but a live `context.setOffline(true)` test
+  exercised a different path than expected**: a hard network cut made the
+  per-round `getDoc()` calls in `CalendarView.jsx`'s `Promise.all` reject
+  outright ("client is offline") rather than resolve via the new
+  `fromCache` check, so the existing `catch` block absorbed it and simply
+  left the prior (correct) state untouched. Same safe outcome — no
+  misleading "just synced" timestamp ever appeared, confirmed twice,
+  including after warming the cache with clean online loads immediately
+  before — just via a different mechanism than the diff's own comment
+  implies. Not a regression: this `Promise.all`-over-`getDoc` shape
+  predates this round entirely.
+
+Deployed: hosting only. Firestore integrity unaffected (no rules/data
+changes either round). Pushed to `origin/main` @ `2ccab9d`.
+
+**Still open:**
+- The real-device PWA test (Add to Home Screen, real FCM push) — still
+  unchanged, still needs an actual phone, not this VPS.
+- The env-var guard gap above — real, not blocking, no follow-up spec
+  written yet.
+- v4 (multi-series expansion) — unchanged from the roadmap above, still
+  needs per-series API research before any spec gets written.
