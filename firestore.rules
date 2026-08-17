@@ -364,6 +364,10 @@ service cloud.firestore {
       allow read: if isAuth();
       allow write: if false;
     }
+    match /driverStats/{series}/overtakes/{roundId} {
+      allow read: if isAuth();
+      allow write: if false;
+    }
 
     // Publisher RSS is fetched exclusively by the scheduled Cloud Function.
     // Signed-in players can read the bounded, global cache but cannot alter it.

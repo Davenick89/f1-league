@@ -142,6 +142,11 @@ function validateApiSessionStr(hardcodedStr, apiStr) {
 const JOLPICA_BASE_URL = process.env.JOLPICA_BASE_URL || "https://api.jolpi.ca";
 const OPENF1_BASE_URL = process.env.OPENF1_BASE_URL || "https://api.openf1.org";
 
+// Request discipline: never Promise.all Jolpica or OpenF1 requests; always
+// make them sequentially. Live testing on 2026-08-17 completed 48 sequential
+// requests cleanly, while as few as 6 parallel requests caused failures.
+// These APIs enforce concurrency, not a volume quota.
+
 // Primary source. Returns [{ round, qualStart, sprintQualStart }].
 async function fetchJolpicaSchedule() {
   const res = await fetch(`${JOLPICA_BASE_URL}/ergast/f1/2026.json?limit=100`);
@@ -177,11 +182,9 @@ async function fetchJolpicaSchedule() {
 // not a value the API guarantees. validateApiSessionStr is what makes a
 // wrong guess safe.
 async function fetchOpenF1Schedule() {
-  const [sessionsRes, meetingsRes] = await Promise.all([
-    fetch(`${OPENF1_BASE_URL}/v1/sessions?year=2026`),
-    fetch(`${OPENF1_BASE_URL}/v1/meetings?year=2026`),
-  ]);
+  const sessionsRes = await fetch(`${OPENF1_BASE_URL}/v1/sessions?year=2026`);
   if (!sessionsRes.ok) throw new Error(`OpenF1 HTTP ${sessionsRes.status} (sessions)`);
+  const meetingsRes = await fetch(`${OPENF1_BASE_URL}/v1/meetings?year=2026`);
   if (!meetingsRes.ok) throw new Error(`OpenF1 HTTP ${meetingsRes.status} (meetings)`);
   const sessions = await sessionsRes.json();
   const meetings = await meetingsRes.json();
@@ -509,11 +512,9 @@ exports.refreshDriverStatsCache = onSchedule({ schedule: "every 60 minutes" }, a
     const appended = [];
     for (const round of candidateRounds) {
       if (appended.length) await new Promise((resolve) => setTimeout(resolve, 500));
-      const [results, drivers, constructors] = await Promise.all([
-        fetchJolpicaJson(`/ergast/f1/${season}/${round}/results.json?limit=100`),
-        fetchJolpicaJson(`/ergast/f1/${season}/${round}/driverStandings.json?limit=100`),
-        fetchJolpicaJson(`/ergast/f1/${season}/${round}/constructorStandings.json?limit=100`),
-      ]);
+      const results = await fetchJolpicaJson(`/ergast/f1/${season}/${round}/results.json?limit=100`);
+      const drivers = await fetchJolpicaJson(`/ergast/f1/${season}/${round}/driverStandings.json?limit=100`);
+      const constructors = await fetchJolpicaJson(`/ergast/f1/${season}/${round}/constructorStandings.json?limit=100`);
       const normalized = normalizeRound(results, drivers, constructors);
       // A scheduled race can be present before its classification is published.
       // Stop at the first such round so it is retried next hour in order.
@@ -556,6 +557,117 @@ exports.refreshDriverStatsCache = onSchedule({ schedule: "every 60 minutes" }, a
   } catch (err) {
     // Never clear or overwrite an existing cache document when Jolpica fails.
     console.error("[refreshDriverStatsCache] Fetch failed, keeping existing cache:", err.message);
+  }
+});
+
+// ─── On-track overtake cache ───────────────────────────────────────────────
+// Kept in per-round documents so this independent, relatively slow backfill
+// never contends with refreshDriverStatsCache's season-summary document.
+const OVERTAKES_COLLECTION = `${DRIVER_STATS_DOC}/overtakes`;
+const OVERTAKES_STATE_DOC = `${OVERTAKES_COLLECTION}/_state`;
+
+function lapTimingRows(data) {
+  const race = data?.MRData?.RaceTable?.Races?.[0];
+  return (race?.Laps || []).flatMap((lap) => (lap.Timings || []).map((timing) => ({
+    lap: Number(lap.number),
+    driverId: timing.driverId,
+    position: Number(timing.position),
+  }))).filter((timing) => Number.isFinite(timing.lap) && timing.driverId && Number.isFinite(timing.position));
+}
+
+async function fetchRoundLapTimings(season, round) {
+  const timings = [];
+  for (let offset = 0; ; offset += 100) {
+    const page = await fetchJolpicaJson(`/ergast/f1/${season}/${round}/laps.json?limit=100&offset=${offset}`);
+    const rows = lapTimingRows(page);
+    timings.push(...rows);
+    if (rows.length < 100) break;
+  }
+  return timings;
+}
+
+function calculateOvertakes(lapRows, resultsData) {
+  const positionsByLap = new Map();
+  lapRows.forEach(({ lap, driverId, position }) => {
+    if (!positionsByLap.has(lap)) positionsByLap.set(lap, new Map());
+    positionsByLap.get(lap).set(driverId, position);
+  });
+  const gridByDriver = new Map((resultsData?.MRData?.RaceTable?.Races?.[0]?.Results || [])
+    .filter((result) => result.Driver?.driverId && Number(result.grid) > 0)
+    .map((result) => [result.Driver.driverId, Number(result.grid)]));
+  const totals = new Map([...gridByDriver.keys()].map((driverId) => [driverId, { driverId, gained: 0, lost: 0 }]));
+  const sortedLaps = [...positionsByLap.keys()].sort((a, b) => a - b);
+
+  const addMovement = (previous, current) => {
+    current.forEach((position, driverId) => {
+      if (!previous.has(driverId)) return;
+      const previousPosition = previous.get(driverId);
+      const retiredAhead = [...previous.entries()].filter(([otherId, otherPosition]) => otherPosition < previousPosition && !current.has(otherId)).length;
+      const realGain = previousPosition - position - retiredAhead;
+      const total = totals.get(driverId) || { driverId, gained: 0, lost: 0 };
+      if (realGain > 0) total.gained += realGain;
+      if (realGain < 0) total.lost += Math.abs(realGain);
+      totals.set(driverId, total);
+    });
+  };
+
+  const lapOne = positionsByLap.get(1);
+  if (lapOne) addMovement(gridByDriver, lapOne);
+  for (let index = 1; index < sortedLaps.length; index += 1) {
+    const previousLap = sortedLaps[index - 1];
+    const currentLap = sortedLaps[index];
+    if (currentLap === previousLap + 1) addMovement(positionsByLap.get(previousLap), positionsByLap.get(currentLap));
+  }
+  return [...totals.values()];
+}
+
+exports.refreshOvertakeCache = onSchedule({ schedule: "every 60 minutes", timeoutSeconds: 120 }, async () => {
+  const db = getFirestore();
+  const season = String(new Date().getUTCFullYear());
+  try {
+    const stateSnap = await db.doc(OVERTAKES_STATE_DOC).get();
+    const state = stateSnap.exists && stateSnap.data().season === season ? stateSnap.data() : {};
+    const lastCachedRound = Number(state.lastCachedRound || 0);
+    const scheduleData = await fetchJolpicaJson(`/ergast/f1/${season}.json?limit=100`);
+    const today = new Date().toISOString().slice(0, 10);
+    const candidateRounds = (scheduleData?.MRData?.RaceTable?.Races || [])
+      .map((race) => ({ round: Number(race.round), date: race.date }))
+      .filter((race) => race.round > lastCachedRound && race.date <= today)
+      .sort((a, b) => a.round - b.round)
+      .slice(0, 2);
+
+    const pending = [];
+    for (let index = 0; index < candidateRounds.length; index += 1) {
+      const { round } = candidateRounds[index];
+      if (index) await new Promise((resolve) => setTimeout(resolve, 500));
+      // Grid positions are not included in laps.json, so results.json is the
+      // one additional sequential request needed to count genuine lap-one gains.
+      const results = await fetchJolpicaJson(`/ergast/f1/${season}/${round}/results.json?limit=100`);
+      const lapRows = await fetchRoundLapTimings(season, round);
+      await fetchJolpicaJson(`/ergast/f1/${season}/${round}/pitstops.json?limit=100`);
+      if (!lapRows.length) {
+        console.log(`[refreshOvertakeCache] Round ${round} has no lap timing yet; keeping cache unchanged`);
+        break;
+      }
+      const drivers = calculateOvertakes(lapRows, results);
+      if (!drivers.length) throw new Error(`Round ${round} has no classified grid data`);
+      pending.push({ round, drivers });
+    }
+    if (!pending.length) {
+      console.log(`[refreshOvertakeCache] No new complete rounds for ${season}; keeping cache unchanged`);
+      return;
+    }
+    // Commit only after every selected round has fully fetched and computed:
+    // a failure cannot leave an invocation's first round cached on its own.
+    const batch = db.batch();
+    const fetchedAt = new Date().toISOString();
+    pending.forEach(({ round, drivers }) => batch.set(db.doc(`${OVERTAKES_COLLECTION}/round${round}`), { round, drivers }));
+    batch.set(db.doc(OVERTAKES_STATE_DOC), { season, lastCachedRound: pending[pending.length - 1].round, fetchedAt });
+    await batch.commit();
+    console.log(`[refreshOvertakeCache] Cached ${pending.length} round(s), through round ${pending[pending.length - 1].round}`);
+  } catch (err) {
+    // Never write a partial round or replace a previously cached round on failure.
+    console.error("[refreshOvertakeCache] Fetch failed, keeping existing cache:", err.message);
   }
 });
 

@@ -226,15 +226,16 @@ function RaceInsightPanel({ series, currentRound }) {
     let cancelled = false;
     setHistories({});
     const getHistory = httpsCallable(functions, 'getDriverCircuitHistory');
-    drivers.forEach((driver) => {
-      getHistory({ series, driverId: driver.id, circuitId: circuit.id })
-        .then((result) => {
+    (async () => {
+      for (const driver of drivers) {
+        try {
+          const result = await getHistory({ series, driverId: driver.id, circuitId: circuit.id });
           if (!cancelled && result.data?.races?.length) {
             setHistories((current) => ({ ...current, [driver.id]: result.data }));
           }
-        })
-        .catch(() => {});
-    });
+        } catch (_) {}
+      }
+    })();
     return () => { cancelled = true; };
   }, [series, circuit?.id, drivers.map((driver) => driver.id).join(',')]);
 

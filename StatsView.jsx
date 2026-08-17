@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, getDocs, onSnapshot } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { Line, LineChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { db, functions, gridToFinishDeltas, summarizeDriverSeason } from './shared.js';
@@ -86,6 +86,7 @@ export default function StatsView({ series }) {
   const [allCircuits, setAllCircuits] = useState([]);
   const [showAllSeasonForm, setShowAllSeasonForm] = useState(false);
   const [headToHeadMode, setHeadToHeadMode] = useState('teammates');
+  const [overtakeRounds, setOvertakeRounds] = useState(null);
 
   // FIX (post-buildplan-stats audit): 'system/driverStats/{series}' is a
   // 3-segment (odd) path — Firestore resolves that to a collection, not a
@@ -94,6 +95,19 @@ export default function StatsView({ series }) {
   useEffect(() => onSnapshot(doc(db, 'driverStats', series),
     (snapshot) => { setStats(snapshot.exists() ? snapshot.data() : null); setError(''); },
     () => setError('Performance stats could not be loaded.')), [series]);
+
+  // Overtakes are deliberately a separate per-round cache. Its absence or a
+  // partial backfill must not hold up the rest of this view or masquerade as 0.
+  useEffect(() => {
+    let cancelled = false;
+    setOvertakeRounds(null);
+    getDocs(collection(db, 'driverStats', series, 'overtakes'))
+      .then((snapshot) => {
+        if (!cancelled) setOvertakeRounds(snapshot.docs.map((entry) => entry.data()).filter((entry) => Number.isFinite(entry.round) && Array.isArray(entry.drivers)));
+      })
+      .catch(() => { if (!cancelled) setOvertakeRounds(null); });
+    return () => { cancelled = true; };
+  }, [series]);
 
   // FIX: Track history's circuit picker used to be derived from this
   // season's cached rounds — capped at whatever refreshDriverStatsCache had
@@ -194,6 +208,16 @@ export default function StatsView({ series }) {
   };
   const summary = useMemo(() => summarizeDriverSeason(drivers, rounds), [drivers, rounds]);
   const deltas = useMemo(() => gridToFinishDeltas(summary, rounds), [summary, rounds]);
+  const overtakesByDriver = useMemo(() => {
+    if (!overtakeRounds) return null;
+    const expectedRounds = new Set(rounds.map((round) => round.round));
+    const cachedRounds = new Set(overtakeRounds.map((round) => round.round));
+    if (!expectedRounds.size || [...expectedRounds].some((round) => !cachedRounds.has(round))) return null;
+    return overtakeRounds.reduce((totals, round) => {
+      round.drivers.forEach(({ driverId, gained }) => totals.set(driverId, (totals.get(driverId) || 0) + Number(gained || 0)));
+      return totals;
+    }, new Map());
+  }, [overtakeRounds, rounds]);
   // FIX (post-buildplan-stats audit): the spec's frontend requirement is
   // "select two drivers, compare current-season results" — any two drivers,
   // not only when they happened to share a constructor that round. The
@@ -308,13 +332,14 @@ export default function StatsView({ series }) {
     </CollapsibleSection>
 
     <CollapsibleSection title="Season form">
-      <p className="text-xs text-gray-500 mb-3">Adjusted for cars that retired ahead of this driver — not a count of on-track overtakes.</p>
-      <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="text-left text-gray-500"><tr><th className="pb-2 pr-4 whitespace-nowrap">Driver</th><th className="pb-2 pr-4 text-right tabular-nums whitespace-nowrap">Wins</th><th className="pb-2 pr-4 text-right tabular-nums whitespace-nowrap">Podiums</th><th className="pb-2 pr-4 text-right tabular-nums whitespace-nowrap">DNFs</th><th className="pb-2 pr-4 text-right tabular-nums whitespace-nowrap">Gained (total)</th><th className="pb-2 text-right tabular-nums whitespace-nowrap">Gained (avg)</th></tr></thead><tbody>{(() => {
+      <p className="text-xs text-gray-500 mb-3">Positions gained on track, including at the start and via pit strategy. Excludes places inherited from retirements. Not comparable with F1's official overtake statistics, which use different data and definitions.</p>
+      <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="text-left text-gray-500"><tr><th className="pb-2 pr-4 whitespace-nowrap">Driver</th><th className="pb-2 pr-4 text-right tabular-nums whitespace-nowrap">Wins</th><th className="pb-2 pr-4 text-right tabular-nums whitespace-nowrap">Podiums</th><th className="pb-2 pr-4 text-right tabular-nums whitespace-nowrap">DNFs</th><th className="pb-2 pr-4 text-right tabular-nums whitespace-nowrap">Overtakes</th><th className="pb-2 text-right tabular-nums whitespace-nowrap">Grid→Finish (avg)</th></tr></thead><tbody>{(() => {
         const movementByDriver = new Map(deltas.map((driver) => [driver.id, driver]));
         const rows = [...summary].sort((a, b) => b.wins - a.wins || b.podiums - a.podiums || a.name.localeCompare(b.name));
         return (showAllSeasonForm ? rows : rows.slice(0, 10)).map((driver) => {
           const movement = movementByDriver.get(driver.id);
-          return <tr key={driver.id} className="border-t border-gray-900"><DriverCell driver={driver} /><td className="pr-4 text-right tabular-nums">{driver.wins}</td><td className="pr-4 text-right tabular-nums">{driver.podiums}</td><td className={`pr-4 text-right tabular-nums ${driver.dnfs ? 'text-red-400' : 'text-gray-300'}`}>{driver.dnfs}</td><td className={`pr-4 text-right tabular-nums ${movement?.delta >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{movement?.delta > 0 ? '+' : ''}{movement?.delta ?? 0}</td><td className="text-right tabular-nums text-gray-300">{movement?.average > 0 ? '+' : ''}{(movement?.average ?? 0).toFixed(1)}</td></tr>;
+          const overtakes = overtakesByDriver?.get(driver.id);
+          return <tr key={driver.id} className="border-t border-gray-900"><DriverCell driver={driver} /><td className="pr-4 text-right tabular-nums">{driver.wins}</td><td className="pr-4 text-right tabular-nums">{driver.podiums}</td><td className={`pr-4 text-right tabular-nums ${driver.dnfs ? 'text-red-400' : 'text-gray-300'}`}>{driver.dnfs}</td><td className="pr-4 text-right tabular-nums text-emerald-400">{overtakesByDriver ? overtakes ?? 0 : '—'}</td><td className="text-right tabular-nums text-gray-300">{movement?.average > 0 ? '+' : ''}{(movement?.average ?? 0).toFixed(1)}</td></tr>;
         });
       })()}</tbody></table></div>
       {summary.length > 10 && <button onClick={() => setShowAllSeasonForm((open) => !open)} className="mt-3 flex items-center gap-2 text-sm font-semibold text-gray-400 hover:text-white transition"><span className={`inline-block text-xs transition-transform ${showAllSeasonForm ? '' : '-rotate-90'}`}>▼</span>{showAllSeasonForm ? 'Show fewer' : `Show all ${summary.length} drivers`}</button>}
