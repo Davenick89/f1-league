@@ -1,3 +1,42 @@
+# Build plan: AI Insight Panel — PARKED, corpus unavailable
+
+> **STOP — do not build from this file.** The section 0 gate below was run
+> on 2026-08-14 and **all 8 news sources failed it.** This design has no
+> legitimate corpus to ground in, so it cannot be built as written.
+>
+> What shipped as v3 instead: `buildplan-insight-panel.md` — the same
+> panel, in the same place, built deterministically from v1's stats data
+> (Jolpica, no terms question) with no LLM at all.
+>
+> **Terms check results — all 8 EXCLUDED from LLM-derivative use:**
+>
+> | Source | Deciding basis |
+> |---|---|
+> | The Guardian | Explicit: "shall not use... for any machine learning, machine learning language models and/or artificial intelligence-related purposes... or with any machine learning and/or AI technologies to generate any data or content" |
+> | BBC Sport | Explicit: content "to develop or train artificial intelligence or to do computer analysis" needs permission; RSS business use needs permission and may carry a fee |
+> | GrandPrix.com | Non-commercial licence, explicitly bars "create a derivative work of... any Content" |
+> | The Race | Personal, non-commercial only; "must not... use for commercial purposes any Content" |
+> | Autosport | Motorsport Network template: "for your information and personal use only" |
+> | Motorsport.com | Same Motorsport Network template |
+> | F1Technical | No content ToS exists; `robots.txt` blocks GPTBot + Meta-ExternalAgent |
+> | RaceFans | No ToS exists; `robots.txt` blocks ClaudeBot, anthropic-ai, GPTBot, Google-Extended, CCBot, Bytespider, Amazonbot, meta-externalagent |
+>
+> **These sources remain fine in the News tab** — v2's aggregation use was
+> separately verified and is unaffected. Only LLM-derivative use is barred.
+>
+> **What could unpark this:** a corpus that clears on terms. Candidates
+> never investigated — FIA published documents (stewards' decisions,
+> technical directives; official-body material, often permissively
+> licensed) and open weather APIs for the race location. Both are more
+> decision-relevant for predictions than general news was, so this is
+> worth revisiting on its merits, not just as a salvage job. Research the
+> terms first, same discipline as section 0.
+>
+> Everything below is preserved as the design to return to, not as a
+> spec to execute now.
+
+---
+
 # Build plan: AI Insight Panel (v3) — supersedes the original digest design
 
 **This spec replaces an earlier version of this file.** The original v3

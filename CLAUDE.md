@@ -646,7 +646,31 @@ follow-ups). Firestore integrity check clean throughout.
   on the News tab's UI specifically. What still deserves care: first
   LLM-cost-bearing function in the app, surfaced on the highest-stakes
   page in the app — build and validate carefully for those two reasons,
-  not a calendar gate. Ready to build.
+  not a calendar gate.
+  - **RESOLVED 2026-08-14 — the LLM version is parked; v3 ships without an
+    LLM.** The section 0 terms gate was run and **all 8 news sources
+    prohibit LLM-derivative use.** The Guardian and BBC Sport are
+    explicit about AI/machine-learning specifically; GrandPrix.com bars
+    derivative works; The Race, Autosport and Motorsport.com are
+    personal/non-commercial only; F1Technical and RaceFans have no ToS at
+    all but block AI crawlers (including ClaudeBot by name for RaceFans)
+    in `robots.txt`. Full verbatim clauses are recorded at the top of
+    `buildplan-news-ai.md` — **do not re-run this research**, it's done.
+    These sources are unaffected in the News tab; only LLM-derivative use
+    is barred, which is a separate permission from v2's aggregation use.
+  - **What v3 became**: `buildplan-insight-panel.md` — the same panel in
+    the same place (`PredictionView.jsx`), built deterministically from
+    v1's stats data (Jolpica, no terms question) through fixed templates.
+    No LLM, no API cost, no hallucination risk, nothing to label as
+    AI-generated. Deliberately shows facts only, never "pick X".
+    Needs no new Cloud Function, collection, or rules block — everything
+    it reads (`driverStats/{series}`, `getDriverCircuitHistory`) already
+    exists and is already client-readable.
+  - **What could unpark the LLM version**: a corpus that clears on terms.
+    Never investigated — FIA published documents (stewards' decisions,
+    technical directives) and open weather APIs for the race location.
+    Both are arguably more decision-relevant than general news was, so
+    worth revisiting on merit rather than as salvage.
 - **v4 — expand v1-v3 to other motorsports.** No build spec exists yet and
   none should be written until real per-series research happens first:
   does an open, Jolpica/OpenF1-quality API exist for the next series (e.g.
