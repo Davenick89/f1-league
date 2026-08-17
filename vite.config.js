@@ -16,6 +16,9 @@ export default defineConfig({
         // The FCM worker uses importScripts, so its final registration must
         // be a classic worker rather than an ES module worker.
         rollupFormat: 'iife',
+        // Precache the app shell plus only the icons and manifest needed for
+        // install/offline chrome; Firestore and API responses stay out of it.
+        globPatterns: ['**/*.{js,css,html}', 'icons/*.{svg,png}', 'manifest.webmanifest'],
       },
       manifest: {
         name: 'F1 Karvaan Predictions League',

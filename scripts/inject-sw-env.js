@@ -15,6 +15,11 @@ const vars = [
   'VITE_FIREBASE_MESSAGING_SENDER_ID',
   'VITE_FIREBASE_APP_ID',
 ];
+const missingVars = vars.filter(key => !env[key]?.trim());
+if (missingVars.length > 0) {
+  throw new Error(`Missing required Firebase environment variable(s): ${missingVars.join(', ')}`);
+}
+
 let sw = fs.readFileSync(swPath, 'utf8');
-for (const key of vars) sw = sw.replaceAll(`__${key}__`, env[key] ?? '');
+for (const key of vars) sw = sw.replaceAll(`__${key}__`, env[key]);
 fs.writeFileSync(swPath, sw);

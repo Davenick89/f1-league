@@ -13,6 +13,7 @@ function CalendarView({ group, user, currentRound }) {
   const [currentCountdown, setCurrentCountdown] = useState('');
   const [refreshTick, setRefreshTick] = useState(0);
   const [lastSyncedAt, setLastSyncedAt] = useState(null);
+  const [isShowingCachedData, setIsShowingCachedData] = useState(false);
   const isOnline = useOnlineStatus();
   const { apiData } = useF1ApiSchedule(2026);
 
@@ -38,11 +39,13 @@ function CalendarView({ group, user, currentRound }) {
         const resultsArr = await Promise.all(
           pastRoundNums.map(n =>
             getDoc(doc(db, `groups/${group.id}/results`, `round${n}`))
-              .then(d => [n, d.exists() ? d.data() : null])
+              .then(snapshot => [n, snapshot])
           )
         );
         const resultsMap = {};
-        resultsArr.forEach(([n, data]) => { if (data) resultsMap[n] = data; });
+        resultsArr.forEach(([n, snapshot]) => {
+          if (snapshot.exists()) resultsMap[n] = snapshot.data();
+        });
         setResults(resultsMap);
 
         const nicknames = {};
@@ -50,7 +53,14 @@ function CalendarView({ group, user, currentRound }) {
           nicknames[memberId] = predsMap[memberId]?.nickname || "?";
         });
         setMemberNicknames(nicknames);
-        setLastSyncedAt(new Date());
+
+        // Firestore can resolve a read from its persistent cache while offline.
+        // Keep the last *server* sync time intact so cached data is never presented
+        // as if it were freshly synced.
+        const snapshots = [predsSnap, scoresSnap, ...resultsArr.map(([, snapshot]) => snapshot)];
+        const showingCachedData = snapshots.some(snapshot => snapshot.metadata.fromCache);
+        setIsShowingCachedData(showingCachedData);
+        if (!showingCachedData) setLastSyncedAt(new Date());
       } catch (e) {
         console.error("Calendar load error:", e);
       } finally {
@@ -300,7 +310,7 @@ function CalendarView({ group, user, currentRound }) {
               first-ever load happening while offline (data still served from Firestore's
               persistent cache) showed no indicator at all. Falls back to a generic message
               when there's no prior-successful-load timestamp yet. */}
-          {!isOnline && (
+          {(isShowingCachedData || !isOnline) && (
             <span className="text-xs text-yellow-400 text-right">
               {lastSyncedAt
                 ? `Offline — showing data from last sync at ${lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
