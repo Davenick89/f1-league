@@ -39,6 +39,8 @@ A React single-page app for running an F1 predictions league among friends. Play
 | `buildplan-news.md` | Spec doc for the RSS News Tab (v2) build — implemented, kept for reference |
 | `buildplan-news-ai.md` | Original spec for an LLM-generated insight panel (v3) — **parked, not built.** Its own section 0 terms gate found all 8 News sources prohibit LLM-derivative use (verbatim clauses recorded at the top of the file). Kept as a record of that research so it's never re-run; v3 shipped a different way instead — see `buildplan-insight-panel.md` |
 | `buildplan-insight-panel.md` | Spec doc for the Race Insight Panel (v3) as actually built — implemented and deployed. See "Race Insight Panel" below |
+| `buildplan-readability.md` | Spec doc for the Stats/News readability pass — implemented and deployed. Presentation-layer only bar one regex in `normalizeNewsItems` |
+| `buildplan-overtakes.md` | Spec doc for on-track overtakes + the two Jolpica concurrency-burst fixes — implemented and deployed. Its section 1 (request discipline) is the part worth re-reading; see "Jolpica request discipline" below |
 | `buildplan-pwa-fixes.md` | Spec doc for 5 low-priority PWA-audit fixes — implemented and deployed, kept for reference |
 | `.claude/launch.json` | Dev server configs for Claude Code browser preview |
 | `security/INCIDENT_RESPONSE.md` | Rollback procedures, deploy-phase checklists, backup/restore commands |
@@ -65,7 +67,8 @@ All are scheduled (`onSchedule`) except the callable/request endpoints:
 - `refreshScheduleCache` — every hour, fetches Jolpica (falls back to OpenF1), validates against the hardcoded schedule, caches overrides to `/system/scheduleCache`
 - `refreshDriverStatsCache` — every hour, incrementally backfills `/driverStats/{series}` from Jolpica (capped at 5 rounds/run — see "Driver/Team Performance Stats" below)
 - `getDriverCircuitHistory` (`onCall`) — lazy, cached driver×circuit all-time lookup for Track History
-- `refreshNewsCache` — every 30 min, refreshes one Firestore doc per RSS source independently (`Promise.allSettled` — one publisher outage never blocks the others) — see "RSS News Tab" below
+- `refreshNewsCache` — every 30 min, refreshes one Firestore doc per RSS source independently (`Promise.allSettled` — one publisher outage never blocks the others; this is 8 *different* publisher hosts, so it is not a violation of the Jolpica sequential rule below) — see "RSS News Tab" below
+- `refreshOvertakeCache` — every hour, `timeoutSeconds: 120`, capped at **2 rounds per run** (each round is ~16 Jolpica requests vs `refreshDriverStatsCache`'s 3). Computes on-track overtakes from lap-by-lap position data, writes one doc per round to `/driverStats/{series}/overtakes/{roundId}` — see "Jolpica request discipline" and "On-track overtakes" below
 - `unsubscribeEmail` (`onRequest`) — one-click unsubscribe link handler, HMAC-signed token
 - `acceptInvite` (`onCall`) — invite redemption, the only path that can add a member to a group; transactional (concurrent redemptions can't double-count)
 
@@ -123,6 +126,7 @@ Shipped 2026-08-17, deterministic — **not** the LLM design originally specced 
 /invites/{code}                        — invite links
 /driverStats/{series}                  — cached season stats ("f1" today), see Stats section above
 /driverStats/{series}/circuits/{pairId} — lazy driver×circuit history cache, pairId = "{driverId}::{circuitId}"
+/driverStats/{series}/overtakes/{roundId} — per-round on-track overtake tallies; `_state` doc holds lastCachedRound
 /news/{sourceId}                       — cached RSS items per publisher (8 sources), see RSS News Tab section above
 /system/scheduleCache                  — validated Jolpica/OpenF1 schedule overrides
 ```
@@ -828,3 +832,109 @@ changes either round). Pushed to `origin/main` @ `2ccab9d`.
   written yet.
 - v4 (multi-series expansion) — unchanged from the roadmap above, still
   needs per-series API research before any spec gets written.
+
+### Update — 2026-08-17 (later): readability pass + on-track overtakes shipped
+
+Two more rounds after the v3/PWA ships above.
+
+**Stats & News readability pass** (`5467dbf`, spec in
+`buildplan-readability.md`, mockup at
+`https://claude.ai/code/artifact/b948d91b-265f-4ce3-b312-3a5a658e98ed`).
+Presentation-layer only, bar one regex. Stats: team-colour rails on every
+driver row (reusing `TEAM_COLORS`), right-aligned `tabular-nums`, and the
+two per-driver tables merged into one **"Season form"** table with a
+top-10 default plus a "Show all 22" expander borrowed from `NewsView`'s
+existing pattern. Driver toggles are now grouped by team rather than 22
+loose pills. A new **teammate head-to-head** joined the existing
+any-two-drivers picker under one section with a mode toggle, defaulting to
+Teammates. Net effect: **five collapsible sections became four** while
+gaining a metric. News: relative timestamps, two-line excerpt clamp,
+reserved thumbnail slot (sources without feed images were leaving a ragged
+edge), larger lead-item title, and a conservative regex in
+`normalizeNewsItems` stripping trailing publisher section tags
+("| Brief", "| Debates and Polls") — only one short final segment, never
+emptying a title.
+- **Teammate tallies deliberately skip DNF rounds** rather than scoring
+  them as a loss, so qualifying and race totals legitimately differ (a
+  pair can be 11 qualifying comparisons and 9 race ones). Don't "fix" that
+  into symmetry.
+- **`w-full` → `min-w-full` + `whitespace-nowrap`** was a live-caught bug,
+  not in the original build: on a 390px phone the newly six-column tables
+  wrapped their text instead of triggering the intended horizontal scroll.
+  Invisible in code review — `w-full` reads as correct — and only found by
+  rendering at phone width. Verified by checking `scrollWidth >
+  clientWidth` *and* that scrolling actually reveals the clipped columns.
+
+**On-track overtakes + Jolpica request discipline** (`6800a45`, spec in
+`buildplan-overtakes.md`). See the two sections below.
+
+**Carried forward — this feature is NOT yet fully live-verified:**
+- **`refreshOvertakeCache` has never been observed completing a real
+  run.** It deployed on its hourly schedule but was never live-triggered
+  (previous session hit its context limit). Check
+  `driverStats/f1/overtakes/_state` for `lastCachedRound`, plus the
+  per-round docs and the function logs: did a 2-round run finish inside
+  its 120s timeout, and were there any 429s despite sequential pacing?
+  Until the backfill catches up the Stats column shows "—", which is the
+  specced behaviour for not-yet-computed, **not** a bug and not the same
+  as 0.
+- No live screenshot pass on the Season form table with the Overtakes
+  column.
+
+### Jolpica request discipline — the rule, and why
+
+Research (2026-08-17, live-tested against Round 11) established that the
+429s this project kept hitting are a **concurrency limiter, not a volume
+limiter**:
+- 48 sequential requests completed in 36s with **zero** failures.
+- 20 parallel produced 3-20 failures; **6 parallel was enough to break
+  OpenF1**.
+- Recovery is immediate — a single sequential request straight after a
+  burst succeeds. It is not a timed ban.
+- **No `Retry-After` or `X-RateLimit-*` headers exist**, so pacing must be
+  hardcoded and conservative; adaptive backoff has nothing to read.
+
+**The rule: never `Promise.all` over Jolpica or OpenF1 requests. Always
+sequential.** This is written into `functions/index.js` above the fetch
+helpers with the measured numbers, so it isn't rediscovered a fourth time.
+
+This explained — and `6800a45` fixed — both prior 429 incidents:
+`refreshDriverStatsCache`'s `Promise.all` over three per-round calls, and
+the Race Insight Panel firing ~8 parallel `getDriverCircuitHistory` calls
+(3 of 8 confirmed failing live, silently dropping those drivers'
+track-history line on first view of a round; it looked intermittent only
+because the per-pair cache means it happens once per new round). The panel
+now loops sequentially and still fills lines in progressively — serialising
+must not become a blocking wait.
+
+`refreshNewsCache`'s `Promise.allSettled` is **not** a violation: those are
+8 different publisher hosts, not one rate-limited API, and per-source
+failure isolation was v2's explicit requirement.
+
+### On-track overtakes
+
+Metric shown as one column in Stats' Season form table, replacing the
+redundant "Gained (total)" (the average was kept).
+
+- **Source: Jolpica `laps.json`.** OpenF1 was evaluated and rejected —
+  its far-fewer-requests advantage is worthless once you know request
+  *count* isn't the constraint, `/v1/laps` carries no position field at
+  all, and `/v1/position` returns timestamped events needing correlation
+  to lap boundaries (real complexity, real bug surface, no gain).
+- **`limit` is silently capped at 100** by Jolpica regardless of what's
+  requested — a round's ~1,430 lap×driver rows need 15 paginated requests
+  plus 1 for pitstops. That cap is why the per-run round cap is 2, not 5.
+- **The computation**: `realGain = (prevPos - currPos) - retiredAhead`,
+  where `retiredAhead` counts drivers who were ahead at the previous lap
+  and are absent at the current one. That exclusion is the whole point —
+  places inherited from retirements are not overtakes. Lap 1 counts,
+  measured from the grid (a good start is genuinely passing people).
+  Non-consecutive laps are never compared (guarded by
+  `currentLap === previousLap + 1`).
+- **Pit cycles are deliberately NOT filtered** — undercuts and overcuts
+  are meant to count, which also removes the hardest part of the
+  algorithm.
+- **The caption is load-bearing, not decoration**: this metric does not
+  and cannot match F1's official overtake statistics, which use
+  proprietary telemetry and different definitions. The number is only
+  honest if what it counts is stated alongside it.
