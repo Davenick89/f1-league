@@ -868,18 +868,37 @@ emptying a title.
 **On-track overtakes + Jolpica request discipline** (`6800a45`, spec in
 `buildplan-overtakes.md`). See the two sections below.
 
-**Carried forward — this feature is NOT yet fully live-verified:**
-- **`refreshOvertakeCache` has never been observed completing a real
-  run.** It deployed on its hourly schedule but was never live-triggered
-  (previous session hit its context limit). Check
-  `driverStats/f1/overtakes/_state` for `lastCachedRound`, plus the
-  per-round docs and the function logs: did a 2-round run finish inside
-  its 120s timeout, and were there any 429s despite sequential pacing?
-  Until the backfill catches up the Stats column shows "—", which is the
-  specced behaviour for not-yet-computed, **not** a bug and not the same
-  as 0.
-- No live screenshot pass on the Season form table with the Overtakes
-  column.
+**RESOLVED 2026-08-18 — `refreshOvertakeCache` verified healthy, backfill
+complete, live screenshots taken.** Read directly from Firestore via the
+Admin SDK (`firebase functions:log` proved unreliable this session —
+repeated `--only refreshOvertakeCache` queries with `-n` up to 2000
+silently returned the same short, stale window every time; Firestore
+state is the trustworthy source, matching the prior session's own
+"logs and `_state` are the only real signal" framing):
+- `driverStats/f1/overtakes/_state`: `lastCachedRound: 11`, matching
+  `driverStats/f1`'s own `lastCachedRound` exactly — the overtakes cache
+  isn't just running, it's fully caught up to the same round the rest of
+  the app already trusts as latest-complete. All 11 `round{N}` docs exist
+  under `driverStats/f1/overtakes/`, each with 22 drivers.
+  `fetchedAt: 2026-08-17T18:46:13.583Z` — the backfill finished the same
+  evening it shipped, inside the ~6h estimate.
+  - No error/429/"Fetch failed" lines found anywhere in the retrievable
+    function logs for this function.
+- **Live screenshot pass done** — signed in via
+  `security/e2e-test-signin.cjs` + Playwright (real production data, the
+  isolated E2E test league only, per that script's own design), Stats
+  page, Season form table:
+  - Desktop (1440px): Overtakes column renders populated real numbers
+    (e.g. Verstappen 90, Antonelli 54), team-colour rails, tabular-nums
+    alignment, caption present and legible — matches the design
+    reference.
+  - Phone (390px): confirmed the table **is** horizontally scrollable
+    (`scrollWidth` 542 vs `clientWidth` 316) rather than clipped-and-stuck
+    — scrolling right brings Overtakes fully into view, legible. This is
+    the same `min-w-full`/`whitespace-nowrap` fix from the readability
+    pass working as intended, not a regression.
+  - Screenshots sent directly to the user, not committed (repo policy,
+    see the 2026-08-14 update below).
 
 ### Jolpica request discipline — the rule, and why
 
