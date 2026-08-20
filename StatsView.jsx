@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, doc, getDocs, onSnapshot } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { Line, LineChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Line, LineChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { db, functions, gridToFinishDeltas, summarizeDriverSeason } from './shared.js';
 
 // Real 2026-grid team colors, keyed by Jolpica's constructorId, so the
@@ -327,8 +327,12 @@ export default function StatsView({ series }) {
           directly, both there and on desktop); this is the standard
           defensive fix for this exact class of ResponsiveContainer sizing
           issue and is harmless either way, but flagging it's unconfirmed on
-          an actual device. */}
-      <div className="h-72 w-full"><ResponsiveContainer width="100%" height="100%" minWidth={280}><LineChart data={progression}><CartesianGrid stroke="#262626" /><XAxis dataKey="round" stroke="#737373" /><YAxis stroke="#737373" /><Tooltip contentStyle={{ background: '#171717', border: '1px solid #404040' }} /><Legend />{selectedChartEntries.map((entry) => <Line key={entry.id} type="monotone" dataKey={entry.id} name={entry.name} stroke={colorFor(entry)} strokeDasharray={dashFor(entry)} strokeWidth={2} connectNulls />)}</LineChart></ResponsiveContainer></div>
+          an actual device. No <Legend /> here — it shares this fixed-height
+          box with the chart itself, and with all 22 drivers selected its
+          own wrapped rows outgrew the box and squeezed/warped the plot
+          area. The team-grouped toggle pills above already show every
+          driver's name and color, so it was a redundant legend anyway. */}
+      <div className="h-72 w-full"><ResponsiveContainer width="100%" height="100%" minWidth={280}><LineChart data={progression}><CartesianGrid stroke="#262626" /><XAxis dataKey="round" stroke="#737373" /><YAxis stroke="#737373" /><Tooltip contentStyle={{ background: '#171717', border: '1px solid #404040' }} />{selectedChartEntries.map((entry) => <Line key={entry.id} type="monotone" dataKey={entry.id} name={entry.name} stroke={colorFor(entry)} strokeDasharray={dashFor(entry)} strokeWidth={2} connectNulls />)}</LineChart></ResponsiveContainer></div>
     </CollapsibleSection>
 
     <CollapsibleSection title="Season form">
