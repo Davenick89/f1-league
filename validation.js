@@ -19,6 +19,16 @@ const VALID_DRIVERS = [
   "Sergio Perez", "Valtteri Bottas",
 ];
 
+// TEMPORARY (Zandvoort 2026): predictions for round 12 were open before
+// Hadjar's roster removal above, so a player who picked him in any field
+// pre-injury still has his name saved. validatePredictions() below checks
+// every field on every save, not just the one being edited — without this,
+// that player couldn't save ANY edit (even to an unrelated field) until
+// they noticed and manually cleared the stale Hadjar pick themselves.
+// Grandfathered into validation only, never into the F1_DRIVERS dropdown,
+// so it can't be newly selected. Remove alongside the F1_DRIVERS revert.
+const LEGACY_VALID_DRIVERS = ["Isack Hadjar"];
+
 // Strip HTML tags and potentially dangerous characters.
 // Returns empty string for non-string input.
 export function sanitizeInput(str) {
@@ -49,7 +59,7 @@ export function validateNickname(name) {
 // Prediction field: must be a known 2026 driver name (or empty — allowed)
 export function validateDriverName(driverName) {
   if (!driverName) return { valid: true, value: '' };
-  if (!VALID_DRIVERS.includes(driverName)) {
+  if (!VALID_DRIVERS.includes(driverName) && !LEGACY_VALID_DRIVERS.includes(driverName)) {
     return { valid: false, error: `Unknown driver: ${driverName}` };
   }
   return { valid: true, value: driverName };
