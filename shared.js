@@ -195,12 +195,22 @@ export const F1_SCHEDULE_2026 = [
   { round: 23, name: "Abu Dhabi",          location: "Yas Island",    date: "2026-12-06", fp1: "2026-12-04T09:30:00Z", fp2: "2026-12-04T13:00:00Z", qualStart: "2026-12-05T14:00:00Z", raceStart: "2026-12-06T13:00:00Z", isSprint: false },
 ];
 
+// TEMPORARY (Zandvoort 2026, round TBD): Hadjar out with a wrist injury.
+// Lawson steps up from Racing Bulls to cover his Red Bull Racing seat;
+// Tsunoda fills Lawson's vacated Racing Bulls seat. Expected for "a few
+// races" per team announcement — revert this pair swap (Lawson back to
+// Racing Bulls, Hadjar back in) once Hadjar is confirmed fit. This is a
+// manual hardcoded list with no live-API sync — see CLAUDE.md's driver
+// roster section for why (team lineup changes aren't published as
+// structured forward-looking data anywhere Jolpica or any other API
+// mirrors) and the planned Firestore-backed admin-editable roster that
+// will replace this array.
 export const F1_DRIVERS = [
   "Lando Norris", "Oscar Piastri", "George Russell", "Kimi Antonelli",
-  "Charles Leclerc", "Lewis Hamilton", "Max Verstappen", "Isack Hadjar",
+  "Charles Leclerc", "Lewis Hamilton", "Max Verstappen", "Liam Lawson",
   "Carlos Sainz", "Alexander Albon", "Fernando Alonso", "Lance Stroll",
   "Pierre Gasly", "Franco Colapinto", "Oliver Bearman", "Esteban Ocon",
-  "Liam Lawson", "Arvid Lindblad", "Nico Hulkenberg", "Gabriel Bortoleto",
+  "Yuki Tsunoda", "Arvid Lindblad", "Nico Hulkenberg", "Gabriel Bortoleto",
   "Sergio Perez", "Valtteri Bottas"
 ];
 

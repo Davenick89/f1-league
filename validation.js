@@ -6,12 +6,16 @@
  * Rollback: remove the import line in F1League.jsx — zero data impact.
  */
 
+// TEMPORARY (Zandvoort 2026): kept in lockstep with F1_DRIVERS in shared.js
+// — Hadjar out injured, Lawson covers his Red Bull Racing seat, Tsunoda
+// covers Lawson's vacated Racing Bulls seat. See shared.js's F1_DRIVERS
+// comment for the full context and revert plan.
 const VALID_DRIVERS = [
   "Lando Norris", "Oscar Piastri", "George Russell", "Kimi Antonelli",
-  "Charles Leclerc", "Lewis Hamilton", "Max Verstappen", "Isack Hadjar",
+  "Charles Leclerc", "Lewis Hamilton", "Max Verstappen", "Liam Lawson",
   "Carlos Sainz", "Alexander Albon", "Fernando Alonso", "Lance Stroll",
   "Pierre Gasly", "Franco Colapinto", "Oliver Bearman", "Esteban Ocon",
-  "Liam Lawson", "Arvid Lindblad", "Nico Hulkenberg", "Gabriel Bortoleto",
+  "Yuki Tsunoda", "Arvid Lindblad", "Nico Hulkenberg", "Gabriel Bortoleto",
   "Sergio Perez", "Valtteri Bottas",
 ];
 
