@@ -422,7 +422,17 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
   const handleUnlockPredictions = async () => {
     try {
       const nowIso = new Date().toISOString();
-      const expiresAt = Timestamp.fromDate(new Date(Date.now() + OVERRIDE_WINDOW_MINS * 60 * 1000));
+      // TEMPORARY (Zandvoort 2026, this weekend only — requested after
+      // today's two premature-lock incidents forced repeated manual
+      // unlocks): no expiry window on a manual unlock. Predictions just
+      // stay open until the real scheduled lock time or a manual re-lock —
+      // the real lock time is still independently enforced by
+      // autoLockRound (Cloud Function) regardless of this, so removing the
+      // 15-minute grace window doesn't weaken real enforcement, only
+      // removes an extra auto-relock that added risk with no benefit this
+      // weekend. Revert once this weekend's round has locked/scored: add
+      // back `overrideExpiresAt: Timestamp.fromDate(new Date(Date.now() +
+      // OVERRIDE_WINDOW_MINS * 60 * 1000))` to the batch.set() below.
       // FIX (Track B #7): was three independent writes — a failure between
       // the raceStatus write and the currentOpenRound write left the UI
       // showing an open round while rules still enforced the old one.
@@ -433,7 +443,6 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
         isPredictionOpen: true,
         openedAt: nowIso,
         openedManuallyBy: user.uid,
-        overrideExpiresAt: expiresAt,   // enforced by Firestore rule + frontend countdown
       }, { merge: true });
       batch.update(doc(db, "groups", group.id), {
         currentOpenRound: `round${currentRound}`,
