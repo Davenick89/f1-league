@@ -632,13 +632,19 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
         return;
       }
 
+      // FIX (perf, live player reports of slow-feeling saves): show the
+      // Saving indicator immediately on click, before the nickname lookup
+      // below — that's a full Firestore round-trip with previously zero UI
+      // feedback, so the Save button just looked unresponsive for however
+      // long it took.
+      setIsSaving(true);
+      setMessage("⏳ Saving...");
+
       const userRef = doc(db, "users", user.uid);
       const userDoc = await getDoc(userRef);
       const userNickname = getDisplayName(userDoc.data()?.nickname, userDoc.data()?.googleFirstName, userDoc.data()?.email);
 
       const predRef = doc(db, `groups/${group.id}/predictions`, user.uid);
-      setIsSaving(true);
-      setMessage("⏳ Saving...");
       await setDoc(predRef, {
         nickname: userNickname,
         [`round${currentRound}`]: {
@@ -658,9 +664,15 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
       // confirmation (or a timeout) before telling the player it's saved.
       const confirmed = await waitForServerAck(predRef);
 
-      // Audit trail — distinguish first submission from subsequent edits
+      // Audit trail — distinguish first submission from subsequent edits.
+      // FIX (perf): this used to be awaited before the player ever saw
+      // "Predictions saved!" — an entire extra sequential round-trip added
+      // on top of the wait waitForServerAck() above already does for a
+      // real reason. The audit log is admin-only, read later, never
+      // real-time — nothing the player is waiting on depends on it, so
+      // fire-and-forget it instead of blocking their confirmation on it.
       const raceName = race?.name || `Round ${currentRound}`;
-      await setDoc(doc(collection(db, `groups/${group.id}/auditLog`)), {
+      setDoc(doc(collection(db, `groups/${group.id}/auditLog`)), {
         userId: user.uid,
         nickname: userNickname,
         round: currentRound,
@@ -669,7 +681,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
         predictions: { ...predictions },
         timestamp: serverTimestamp(),
         timestampIso: new Date().toISOString(),
-      });
+      }).catch((err) => console.error("Audit log write failed:", err));
 
       track('prediction_made', {
         race_name: race?.name || `Round ${currentRound}`,
