@@ -325,6 +325,22 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
 
   const isAdmin = group?.admin === user?.uid;
 
+  // ── Lock logic ──────────────────────────────────────────────────────────
+  // Prefer Jolpica API qualifying time over hardcoded — more accurate for the
+  // actual 2026 schedule. getValidatedApiSessionStr applies a sanity check to
+  // catch round-number mismatches (e.g. a cancelled/rescheduled race).
+  // FIX: moved up from further down in the component (was declared after the
+  // override-countdown useEffect below, which references lockTime in its
+  // dependency array — a dependency array is evaluated synchronously as part
+  // of the useEffect() call itself, not deferred like the effect body, so
+  // referencing a later-declared const there is a temporal-dead-zone
+  // ReferenceError that crashes the whole component on every render. Live
+  // symptom: "predictions page isn't loading" immediately after that fix
+  // shipped.
+  const lockOffsetMins = group?.predictionLockOffsetMins ?? 60;
+  const validatedApiSessionStr = getValidatedApiSessionStr(race, apiData?.[currentRound]);
+  const lockTime = getPredictionLockTime(race, lockOffsetMins, validatedApiSessionStr);
+
   // Subscribe to raceStatus — used to let admin override the time-based lock
   useEffect(() => {
     if (!group) return;
@@ -349,8 +365,19 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
     const tick = async () => {
       const secsLeft = Math.max(0, Math.round((expiresMs - Date.now()) / 1000));
       setOverrideSecsLeft(secsLeft);
-      if (secsLeft === 0 && isAdmin) {
-        // Auto-lock Firestore when the window expires — only the admin writes it
+      // FIX: only actually (re-)lock if the round is genuinely past its real
+      // scheduled lock time right now (recomputed fresh here, not read from
+      // the render-scoped `timeLocked` const, which this interval's closure
+      // would otherwise hold stale for its whole 1s-tick lifetime). Without
+      // this, an override granted while the round was WRONGLY locked (e.g.
+      // a transient bad Jolpica/schedule-cache fetch that later
+      // self-corrected — confirmed live: round 12 auto-locked ~18h before
+      // its real Fri 13:30 UTC time, self-corrected within the hour, but
+      // this effect kept blindly re-writing isPredictionOpen: false every
+      // time the 15-min grace window elapsed) would force a real re-lock
+      // for everyone every 15 minutes, with no way back to "actually open"
+      // short of the admin re-unlocking on a loop.
+      if (secsLeft === 0 && isAdmin && lockTime && Date.now() >= lockTime.getTime()) {
         try {
           await setDoc(doc(db, `groups/${group.id}/raceStatus`, `round${currentRound}`), {
             isPredictionOpen: false,
@@ -364,7 +391,7 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
     tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
-  }, [raceStatus?.isPredictionOpen, raceStatus?.overrideExpiresAt, isAdmin, group, currentRound]);
+  }, [raceStatus?.isPredictionOpen, raceStatus?.overrideExpiresAt, isAdmin, group, currentRound, lockTime?.getTime()]);
 
   const handleUnlockPredictions = async () => {
     try {
@@ -675,13 +702,6 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
     return points;
   };
 
-  // ── Lock logic ──────────────────────────────────────────────────────────
-  // Prefer Jolpica API qualifying time over hardcoded — more accurate for the
-  // actual 2026 schedule. getValidatedApiSessionStr applies a 10-day sanity
-  // check to catch round-number mismatches (e.g. a cancelled/rescheduled race).
-  const lockOffsetMins = group?.predictionLockOffsetMins ?? 60;
-  const validatedApiSessionStr = getValidatedApiSessionStr(race, apiData?.[currentRound]);
-  const lockTime = getPredictionLockTime(race, lockOffsetMins, validatedApiSessionStr);
   const timeLocked = lockTime ? Date.now() >= lockTime.getTime() : false;
   const adminOverrideOpen = raceStatus?.isPredictionOpen === true;
   const adminForcedLock = raceStatus?.isPredictionOpen === false;
@@ -689,7 +709,17 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
   const overrideWindowActive = adminOverrideOpen && overrideSecsLeft !== null;
   const overrideWindowExpired = overrideWindowActive && overrideSecsLeft <= 0;
   const effectiveAdminOverrideOpen = adminOverrideOpen && !overrideWindowExpired;
-  const editLocked = adminForcedLock || overrideWindowExpired || (timeLocked && !effectiveAdminOverrideOpen);
+  // FIX: `overrideWindowExpired` used to be OR'd in here as its own trigger,
+  // forcing editLocked = true the instant a 15-min grace window elapsed —
+  // regardless of whether the round is actually still past its real
+  // scheduled lock time. `(timeLocked && !effectiveAdminOverrideOpen)`
+  // already covers the intended case (override expired AND genuinely still
+  // locked) on its own; the standalone term only mattered — incorrectly —
+  // when an override was granted while the round was WRONGLY locked (a
+  // transient bad schedule fetch that later self-corrected) and timeLocked
+  // is actually false. See the tick() comment above for the live incident
+  // this was caught against.
+  const editLocked = adminForcedLock || (timeLocked && !effectiveAdminOverrideOpen);
 
   // Predictions open on Monday of race week. Before that, the form is visible but saving is blocked.
   const predOpenTime = getPredictionOpenTime(race);
