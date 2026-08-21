@@ -378,7 +378,17 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
       // for everyone every 15 minutes, with no way back to "actually open"
       // short of the admin re-unlocking on a loop.
       if (secsLeft === 0 && isAdmin) {
-        const genuinelyLocked = lockTime && Date.now() >= lockTime.getTime();
+        // FIX (Codex audit, post-incident): fail CLOSED, not open, when
+        // there's no valid lock time to reason against (e.g. `race` hasn't
+        // loaded yet on this render — a narrow but real timing window).
+        // The old `lockTime && ...` check treated "no lockTime" the same as
+        // "not locked," which would clear a genuinely-due override's
+        // expiry with nothing left to re-lock it but the 5-min
+        // autoLockRound cron. Doing nothing here just leaves the stale
+        // countdown display for one more tick until lockTime is real.
+        const hasValidLockTime = lockTime instanceof Date && !isNaN(lockTime.getTime());
+        if (!hasValidLockTime) return;
+        const genuinelyLocked = Date.now() >= lockTime.getTime();
         try {
           if (genuinelyLocked) {
             await setDoc(doc(db, `groups/${group.id}/raceStatus`, `round${currentRound}`), {
