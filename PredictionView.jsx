@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, doc, getDoc, setDoc, onSnapshot, serverTimestamp, Timestamp, writeBatch } from 'firebase/firestore';
+import { collection, deleteField, doc, getDoc, setDoc, onSnapshot, serverTimestamp, Timestamp, writeBatch } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { Edit, Info, Lock, X } from 'lucide-react';
 import { db, functions, F1_DRIVERS, formatLockTimeIST, getDisplayName, getPredictionLockTime, getPredictionOpenTime, getValidatedApiSessionStr, gridToFinishDeltas, summarizeDriverSeason, track, useF1ApiSchedule, useOnlineStatus, waitForServerAck } from './shared.js';
@@ -377,14 +377,30 @@ function PredictionView({ group, race, currentRound, countdown, user }) {
       // time the 15-min grace window elapsed) would force a real re-lock
       // for everyone every 15 minutes, with no way back to "actually open"
       // short of the admin re-unlocking on a loop.
-      if (secsLeft === 0 && isAdmin && lockTime && Date.now() >= lockTime.getTime()) {
+      if (secsLeft === 0 && isAdmin) {
+        const genuinelyLocked = lockTime && Date.now() >= lockTime.getTime();
         try {
-          await setDoc(doc(db, `groups/${group.id}/raceStatus`, `round${currentRound}`), {
-            isPredictionOpen: false,
-            autoLockedAt: new Date().toISOString(),
-          }, { merge: true });
+          if (genuinelyLocked) {
+            await setDoc(doc(db, `groups/${group.id}/raceStatus`, `round${currentRound}`), {
+              isPredictionOpen: false,
+              autoLockedAt: new Date().toISOString(),
+            }, { merge: true });
+          } else {
+            // FIX: clearing the stale overrideExpiresAt is what the previous
+            // fix (above) was missing — without it, the round correctly
+            // stays open, but overrideExpiresAt never leaves Firestore, so
+            // this same effect keeps recomputing secsLeft=0 forever and the
+            // UI is stuck showing "Override window — 0:00 remaining then
+            // auto-locks" indefinitely, reading exactly like an ongoing
+            // 15-minute lockout cycle even though nothing is actually
+            // locking. Clearing it collapses the round back to a plain
+            // PREDICTIONS OPEN state with no override banner at all.
+            await setDoc(doc(db, `groups/${group.id}/raceStatus`, `round${currentRound}`), {
+              overrideExpiresAt: deleteField(),
+            }, { merge: true });
+          }
         } catch (err) {
-          console.error("Auto-lock failed:", err);
+          console.error("Auto-lock/override-clear failed:", err);
         }
       }
     };
