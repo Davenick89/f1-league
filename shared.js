@@ -373,32 +373,59 @@ export async function syncScheduleWithAPI() {
   }
 }
 
+// FIX (2026-08-21, second live lock-time incident in 16 hours): this used
+// to fetch Jolpica directly, live, client-side, on every mount of every
+// component that calls this hook — with no defense beyond
+// getValidatedApiSessionStr's 3-day sanity check, a threshold meant to
+// catch gross errors (a round-number mismatch shifting a whole season),
+// not a transient 1-2 hour glitch. A bad value that small sails straight
+// through that check and gets trusted for real lock decisions — confirmed
+// live twice: once ~18h off, once ~1.5h off, both from a raw client fetch.
+// The Cloud Functions never had this problem: autoLockRound/autoOpenRound
+// read /system/scheduleCache, refreshed hourly by refreshScheduleCache,
+// which applies the identical validation before ever overwriting a good
+// cached value — so a single bad Jolpica response there just gets
+// discarded, never trusted. Reading that same cache here — instead of an
+// independent, unvalidated live fetch — means the client and the server
+// now agree on one validated source of truth instead of racing two
+// different ones. onSnapshot (not a one-time read) so a long-open tab
+// picks up an hourly cache correction without needing a reload — the
+// exact scenario that let today's incidents drag on.
+//
+// scheduleCache only stores qualStart/sprintQualStart (the fields
+// lock-time computation actually needs) — raceStart/fp2Start/sprintStart
+// are left null here, same as they were whenever a round had no live
+// override before. The one known consumer of raceStart specifically —
+// ResultsView's "● Jolpica API" vs "○ Hardcoded" indicator — will show
+// "○ Hardcoded" even when qualifying/sprint-quali data IS the validated
+// live value; a minor, accepted display-only side effect, not a
+// correctness issue (that indicator was never used for lock decisions).
 export function useF1ApiSchedule(season = 2026) {
   const [apiData, setApiData] = useState(null);
   const [apiStatus, setApiStatus] = useState('loading'); // 'loading' | 'ok' | 'error'
 
   useEffect(() => {
-    const toIso = (obj) => obj?.date && obj?.time ? `${obj.date}T${obj.time}` : null;
-    fetch(`https://api.jolpi.ca/ergast/f1/${season}.json`)
-      .then(r => { if (!r.ok) throw new Error('API error'); return r.json(); })
-      .then(data => {
-        const races = data?.MRData?.RaceTable?.Races;
-        if (!races?.length) { setApiStatus('error'); return; }
+    const unsub = onSnapshot(
+      doc(db, 'system', 'scheduleCache'),
+      (snap) => {
+        const overrides = snap.data()?.overrides;
+        if (!overrides) { setApiStatus('error'); return; }
         const schedule = {};
-        races.forEach(race => {
-          const round = parseInt(race.round);
-          schedule[round] = {
-            raceStart: toIso(race),
-            fp2Start: toIso(race.SecondPractice),
-            sprintStart: toIso(race.Sprint),
-            sprintQualifyingStart: toIso(race.SprintQualifying),
-            qualifyingStart: toIso(race.Qualifying),
+        Object.entries(overrides).forEach(([round, o]) => {
+          schedule[Number(round)] = {
+            raceStart: null,
+            fp2Start: null,
+            sprintStart: null,
+            sprintQualifyingStart: o.sprintQualStart ?? null,
+            qualifyingStart: o.qualStart ?? null,
           };
         });
         setApiData(schedule);
         setApiStatus('ok');
-      })
-      .catch(() => setApiStatus('error'));
+      },
+      () => setApiStatus('error'),
+    );
+    return () => unsub();
   }, [season]);
 
   return { apiData, apiStatus };

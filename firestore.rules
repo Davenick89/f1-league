@@ -348,6 +348,19 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // FIX (2026-08-21, live lock-time incident): scheduleCache was
+    // previously written only by refreshScheduleCache (Cloud Function,
+    // Admin SDK — bypasses rules entirely) and never read by any client
+    // code, so it had no rule at all here — any direct client read attempt
+    // would have been denied by Firestore's default deny. Now that
+    // useF1ApiSchedule (shared.js) reads it directly instead of doing its
+    // own live, unvalidated Jolpica fetch, it needs a real read rule.
+    // Write stays admin-SDK-only, same as driverStats below.
+    match /system/scheduleCache {
+      allow read: if isAuth();
+      allow write: if false;
+    }
+
     // FIX (post-buildplan-stats audit): the spec's original path,
     // /system/driverStats/{series}, is a 3-segment (odd) path — Firestore
     // resolves that to a COLLECTION, not a document, so the corresponding
