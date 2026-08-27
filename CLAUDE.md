@@ -957,3 +957,118 @@ redundant "Gained (total)" (the average was kept).
   and cannot match F1's official overtake statistics, which use
   proprietary telemetry and different definitions. The number is only
   honest if what it counts is stated alongside it.
+
+### Update — 2026-08-20/21: Zandvoort incident — driver roster swap, two premature-lock incidents, and their fixes
+
+**Note on how this entry exists**: the VPS crashed and killed the session
+that did this work shortly after its last commit — this section is being
+written retroactively from a separate planning session reading `git log`,
+not by the session that shipped it. Every commit below claims live
+verification against the E2E test league, but that verification was done
+by a session that then didn't survive to confirm nothing regressed
+afterward. **A fresh session picking this up should independently
+re-verify the whole stack live, not just trust the commit messages.**
+
+**Driver roster** (`fd43773`) — Hadjar out injured (wrist), expected back
+in a few races. Lawson steps up from Racing Bulls to his Red Bull Racing
+seat; Tsunoda fills Lawson's vacated Racing Bulls seat. `F1_DRIVERS`
+(`shared.js`) and the duplicate `VALID_DRIVERS` allowlist (`validation.js`)
+updated in lockstep — they must stay in sync or `validatePredictions`
+silently rejects picks the dropdown allows. This is a manual hardcoded-list
+edit, not automated: no motorsport API publishes forward-looking lineup
+changes ahead of a session actually happening, since a substitution is
+announced as news, not structured timing data. A Firestore-backed,
+admin-editable roster to replace this hardcoded pair is planned but not
+built.
+
+**Grandfathering** (`5201a97`) — Codex audit caught that round 12's
+predictions were open *before* the roster deploy, so any player who'd
+picked Hadjar in any field pre-injury had his name already saved.
+`validatePredictions()` checks every field on every save, not just the one
+being edited, so that player couldn't save *any* edit until they noticed
+and manually cleared the stale pick. Fixed by grandfathering "Isack
+Hadjar" into `validateDriverName` only, via a separate
+`LEGACY_VALID_DRIVERS` list in `validation.js` — never into `F1_DRIVERS`,
+so he can't be newly selected, only saved-if-already-present.
+
+**Two premature-lock incidents on raceday** (18h early, then ~1.5h
+early) forced repeated manual admin unlocks. Root cause (`8413816`):
+`useF1ApiSchedule` fetched Jolpica directly, client-side, on every mount,
+guarded only by a 3-day sanity check meant to catch gross errors (a
+round-number mismatch) — too coarse to catch a transient hour-or-two
+glitch, which sailed straight through and got trusted for real lock
+decisions. The Cloud Functions (`autoLockRound`/`autoOpenRound`) never had
+this problem — they'd always read `/system/scheduleCache`, refreshed
+hourly by `refreshScheduleCache` with the same validation before ever
+overwriting a good cached value. Client and server were trusting two
+different data sources, and only the client's was flaky. Fixed by pointing
+`useF1ApiSchedule` at that same server-validated cache via `onSnapshot`
+instead of its own fetch — one validated source of truth for both. Added
+the `firestore.rules` read entry the cache needed (previously
+Admin-SDK-only). **Known, accepted side effect**: `ResultsView`'s "Jolpica
+API" vs "Hardcoded" schedule-source indicator now always shows
+"Hardcoded" — cosmetic only, that field was never used for lock decisions.
+
+**Fixing the incident response introduced two more real bugs, caught and
+fixed same-session, in order:**
+1. `cd5f62b` — a crash. An earlier fix in this chain added `lockTime` to a
+   `useEffect` dependency array, but that array evaluates synchronously at
+   the point in the component body where the `useEffect()` call sits
+   textually — `lockTime` wasn't declared until ~350 lines later in the
+   same component, so this was a temporal-dead-zone `ReferenceError` on
+   every render. **The entire Predictions page failed to load, live,
+   immediately after that deploy.** Fixed by moving the three affected
+   declarations earlier in the component, above the effect that depends on
+   them.
+2. `6a9e0c0` — a fix that correctly stopped force-relocking a round early
+   left `overrideExpiresAt` stuck in Firestore, so the UI kept showing
+   "Override window — 0:00 remaining" indefinitely, reading exactly like
+   an ongoing lockout even though nothing was actually re-locking. Fixed
+   by clearing the field when the round isn't genuinely locked.
+3. `3dbc24b` — Codex audit caught that fix #2 could itself fail open: it
+   treated a missing/invalid `lockTime` (e.g. race data not yet loaded on
+   that render) the same as "not genuinely locked," and would clear a
+   *real* override's expiry with nothing left to re-lock it but the 5-min
+   `autoLockRound` cron. Tightened to require a valid `Date` before doing
+   anything — on an invalid `lockTime` it now does nothing rather than
+   risk a bypass.
+
+**TEMPORARY, Zandvoort-weekend-only** (`6a78f59`): the 15-minute
+admin-unlock override auto-relock window was removed entirely — after the
+repeated incidents, it was pure risk with no benefit that weekend. A
+manual unlock now stays open until the real scheduled lock time (still
+independently enforced by `autoLockRound`) or a manual re-lock, no timer
+at all. **This is disabled project-wide, not just for the affected
+round — revert instructions are in a comment at the
+`handleUnlockPredictions` call site. Must be reverted after this
+weekend.**
+
+**Unrelated fixes bundled into the same session:**
+- `5d0857d` — Points progression chart warping on mobile when all drivers
+  are selected.
+- `1295cad` — perceived save latency, from live player complaints.
+  `handleSavePredictions`'s "Saving…" indicator now shows on click instead
+  of after a `getDoc()` nickname lookup completes, and the audit-log write
+  is now fire-and-forget instead of blocking the "Predictions saved!"
+  confirmation on a full extra sequential round-trip. The intentional
+  `waitForServerAck()` correctness wait is untouched — that one trades
+  speed for a real guarantee, not a bug.
+
+All of the above is committed and pushed to `origin/main`, ending at
+`1295cad`.
+
+**Still open / must-do for whoever picks this up next:**
+- Revert the 15-min override window removal (`6a78f59`) after this
+  Zandvoort weekend — see the comment at `handleUnlockPredictions`.
+- Revert the Hadjar grandfather (`LEGACY_VALID_DRIVERS` in
+  `validation.js`) and the `F1_DRIVERS`/`VALID_DRIVERS` roster swap
+  (`fd43773`) once Hadjar is confirmed fit — Lawson back to Racing Bulls,
+  Tsunoda out, Hadjar back in.
+- **Independently re-verify the whole incident-fix stack live** — lock
+  timing, override behavior, Predictions page rendering with zero console
+  errors — since the session that shipped it didn't survive to confirm
+  nothing regressed afterward.
+- Confirm current round/lock state matches reality before trusting
+  anything else — a VPS crash mid-incident-response is exactly the kind of
+  gap where "what actually happened last" needs a fresh live check, not an
+  assumption from commit messages.
