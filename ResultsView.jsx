@@ -1,7 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { collection, doc, getDocs, limit, onSnapshot, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, onSnapshot, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
 import { Edit, Lock } from 'lucide-react';
 import { db, F1_DRIVERS, F1_SCHEDULE_2026, saveRoundScores, useF1ApiSchedule } from './shared.js';
+
+// LIVE INCIDENT (2026-08-27): both handleManualOpenPredictions and
+// handleEndWeekend let admin act on ANY round via the selectedRound
+// dropdown — including reviewing/backfilling old, already-finished
+// rounds — and both unconditionally repointed the group's live
+// currentOpenRound to that round. Backfilling round 7 after the season
+// had already progressed to round 13 silently regressed the pointer
+// backward, and firestore.rules' isRaceOpen() only ever checks the round
+// currentOpenRound names — so real players were locked out of the
+// actual current round's predictions until the pointer was manually
+// corrected. This guard makes the pointer monotonic: it only ever moves
+// to a round number >= wherever it already points, never backward.
+// Equal is allowed (e.g. re-running the manual-open catch-up action for
+// the same round auto-open already opened is a harmless no-op).
+function isSafeToAdvancePointer(currentPointer, candidateRoundNum) {
+  if (!currentPointer) return true; // legacy/unset group — always safe
+  const currentNum = parseInt(currentPointer.replace('round', ''), 10);
+  return !Number.isFinite(currentNum) || candidateRoundNum >= currentNum;
+}
 
 function SessionRow({ label, startIso, durationMs, nowTs }) {
   if (!startIso) return null;
@@ -237,6 +256,10 @@ function ResultsView({ group, user, currentRound }) {
   const handleManualOpenPredictions = async () => {
     setLoading(true);
     try {
+      const groupSnap = await getDoc(doc(db, "groups", group.id));
+      const currentPointer = groupSnap.data()?.currentOpenRound;
+      const pointerSafe = isSafeToAdvancePointer(currentPointer, selectedRound);
+
       // FIX (Track B #7): batched — same reasoning as handleUnlockPredictions.
       const batch = writeBatch(db);
       batch.set(doc(db, `groups/${group.id}/raceStatus`, `round${selectedRound}`), {
@@ -245,10 +268,14 @@ function ResultsView({ group, user, currentRound }) {
         openedAt: new Date().toISOString(),
         openedManuallyBy: user.uid
       }, { merge: true });
-      batch.update(doc(db, "groups", group.id), { currentOpenRound: `round${selectedRound}` });
+      if (pointerSafe) {
+        batch.update(doc(db, "groups", group.id), { currentOpenRound: `round${selectedRound}` });
+      }
       await batch.commit();
-      setMessage(`✅ Predictions opened for Round ${selectedRound} — ${race?.name}`);
-      setTimeout(() => setMessage(""), 4000);
+      setMessage(pointerSafe
+        ? `✅ Predictions opened for Round ${selectedRound} — ${race?.name}`
+        : `✅ Round ${selectedRound} reopened for review — did NOT move the live round pointer (currently ahead, at ${currentPointer}).`);
+      setTimeout(() => setMessage(""), pointerSafe ? 4000 : 7000);
     } catch (err) {
       console.error("Error opening predictions:", err);
       setMessage("❌ Error opening predictions");
@@ -263,6 +290,10 @@ function ResultsView({ group, user, currentRound }) {
     try {
       const nextRound = selectedRound + 1;
       const statusRef = (round) => doc(db, `groups/${group.id}/raceStatus`, `round${round}`);
+
+      const groupSnap = await getDoc(doc(db, "groups", group.id));
+      const currentPointer = groupSnap.data()?.currentOpenRound;
+      const pointerSafe = isSafeToAdvancePointer(currentPointer, nextRound);
 
       // FIX (Track B #7): was up to four independent writes — a failure
       // partway through (e.g. after closing the current round but before
@@ -283,8 +314,11 @@ function ResultsView({ group, user, currentRound }) {
           isPredictionOpen: true,
           openedAt: new Date().toISOString()
         }, { merge: true });
-        // Update group's currentOpenRound so isRaceOpen() points at the right document
-        batch.update(doc(db, "groups", group.id), { currentOpenRound: `round${nextRound}` });
+        // Update group's currentOpenRound so isRaceOpen() points at the right
+        // document — but only moving forward; see isSafeToAdvancePointer.
+        if (pointerSafe) {
+          batch.update(doc(db, "groups", group.id), { currentOpenRound: `round${nextRound}` });
+        }
       }
 
       // Log the event
@@ -292,6 +326,7 @@ function ResultsView({ group, user, currentRound }) {
         event: 'END_WEEKEND',
         closedRound: selectedRound,
         openedRound: nextRound <= F1_SCHEDULE_2026.length ? nextRound : null,
+        pointerAdvanced: nextRound <= F1_SCHEDULE_2026.length && pointerSafe,
         triggeredBy: user.uid,
         timestamp: new Date().toISOString()
       });
@@ -299,7 +334,9 @@ function ResultsView({ group, user, currentRound }) {
       await batch.commit();
 
       const nextRaceName = nextRound <= F1_SCHEDULE_2026.length ? F1_SCHEDULE_2026[nextRound - 1]?.name : null;
-      const nextMsg = nextRaceName ? ` ${nextRaceName} (R${nextRound}) is now open!` : " Season complete!";
+      const nextMsg = !nextRaceName ? " Season complete!"
+        : pointerSafe ? ` ${nextRaceName} (R${nextRound}) is now open!`
+        : ` ${nextRaceName} (R${nextRound}) results saved — did NOT move the live round pointer (currently ahead, at ${currentPointer}).`;
       setMessage(`✅ Weekend closed: Round ${selectedRound} locked.${nextMsg}`);
       setTimeout(() => { setMessage(""); window.location.reload(); }, 3000);
     } catch (err) {
